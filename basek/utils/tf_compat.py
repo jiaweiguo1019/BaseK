@@ -2,13 +2,15 @@ import os
 import sys
 
 
-if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
-    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+if 'TF_CPP_MIN_LOG_LEVEL' not in os.environ:
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 
 def import_tf_compact():
     """Import tensorflow with compact behavior."""
-    if "tensorflow" not in sys.modules:
+    if 'tensorflow' not in sys.modules:
         # if 3 > int(tf.__version__.split('.')[0]) > 1:
         try:
             import tensorflow.compat.v1 as tf
@@ -20,7 +22,7 @@ def import_tf_compact():
             raise ImportError('tf version should not older than 1.15!')
         return tf
     else:
-        return sys.modules["tensorflow"]
+        return sys.modules['tensorflow']
 
 
 tf = import_tf_compact()

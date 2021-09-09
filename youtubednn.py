@@ -8,6 +8,7 @@ from tqdm import tqdm
 from basek.params import args
 from basek.preprocessors.ml_preprocessor import read_raw_data, gen_dataset, gen_model_input
 from basek.layers.embedding import EmbeddingIndex
+from basek.utils.metrics import compute_metrics
 from basek.utils.tf_compat import tf, keras
 
 
@@ -15,7 +16,7 @@ SEQ_LEN = 50
 NEG_SAMPLES = 0
 VALIDATION_SPLIT = 0.1
 EMB_DIM = 32
-EPOCHS = 1000
+EPOCHS = 2
 BATCH_SIZE = 256
 MATCH_NUMS = 50
 
@@ -133,16 +134,18 @@ if __name__ == '__main__':
     grads = tf.gradients(loss, model_vars)
     train_op = optimizer.apply_gradients(zip(grads, model_vars))
 
+    index = faiss.IndexFlatIP(EMB_DIM)
+
     config = tf.ConfigProto()
     config.allow_soft_placement = True
     config.gpu_options.allow_growth = True
+    print('-' * 96)
     with tf.Session(config=config) as sess:
         sess.run(tf.initializers.global_variables())
         train_size = train_input['size']
         val_size = val_input['size']
-
+        prev_time = time()
         for epoch in range(EPOCHS):
-            prev_time = time()
             total_loss = 0.0
             model.save_weights(ckpt_path + f'/{epoch}')
             train_size = train_input['size']
@@ -169,8 +172,8 @@ if __name__ == '__main__':
             curr_time = time()
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
-            print(f'------------- total_loss of epoch-{epoch}: {total_loss / batch_num}, \
-                tiem elapsed: {time_elapsed} -------------')
+            print(f'------------- total_loss of epoch-{epoch}: {(total_loss / batch_num):.8f}, \
+                tiem elapsed: {time_elapsed:.2f}s -------------')
             if val_size == 0:
                 continue
             val_loss, val_user_emb, val_all_item_emb = sess.run(
@@ -178,35 +181,47 @@ if __name__ == '__main__':
                 feed_dict={
                     uid: val_input['uid'], iid: val_input['iid'],
                     hist_item_seq: val_input['hist_item_seq'], hist_item_len: val_input['hist_item_len'],
-                    gender: val_input['gender'], age: val_input['age'], occupation: val_input['occupation'], zip_input: val_input['zip'],
+                    gender: val_input['gender'], age: val_input['age'],
+                    occupation: val_input['occupation'], zip_input: val_input['zip']
                 }
             )
             # faiss.normalize_L2(val_user_emb)
             # faiss.normalize_L2(val_all_item_emb)
-            index = faiss.IndexFlatIP(EMB_DIM)
+            index.reset()
             index.add(val_all_item_emb)
-            D, I = index.search(np.ascontiguousarray(val_user_emb), MATCH_NUMS)
-            hits, ndcgs = [], []
-            for i, (val_uid, val_iid) in tqdm(enumerate(zip(val_input['uid'], val_input['iid']))):
-                    val_uid, val_iid = val_uid[0], val_iid[0]
-                    pred = I[i]
-                    ndcg, hit = 0, 0
-                    for idx, pred_i in enumerate(pred):
-                        if pred_i == val_iid:
-                            ndcg = np.log(2) / np.log(idx + 2)
-                            hit = 1
-                            break
-                    hits.append(hit)
-                    ndcgs.append(ndcg)
-
-            # print("recall", np.mean(s))
+            _, I = index.search(np.ascontiguousarray(val_user_emb), MATCH_NUMS)
+            hr, ndcg = compute_metrics(I, val_input['uid'], val_input['iid'])
             curr_time = time()
             time_elapsed = curr_time - prev_time
-            print(f'------------- val_loss of epoch-{epoch}: {val_loss}, \
-                tiem elapsed: {time_elapsed} -------------')
-            print("hr", np.mean(hits))
-            print('ndcg', np.mean(ndcgs))
+            prev_time = curr_time
+            print(f'------------- val_loss of epoch-{epoch}: {val_loss:.8f}, \
+                tiem elapsed: {time_elapsed:.2f}s -------------')
+            print(f'-------------------------- hr: {hr:.6f}, \
+                ndcg: {ndcg:.6f}. --------------------------')
+            print('-' * 96)
+
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 model.save_weights(ckpt_path + '/best')
+
+        eval_loss, eval_user_emb, eval_all_item_emb = sess.run(
+            [loss, user_emb, all_item_emb],
+            feed_dict={
+                uid: test_input['uid'], iid: test_input['iid'],
+                hist_item_seq: test_input['hist_item_seq'], hist_item_len: test_input['hist_item_len'],
+                gender: test_input['gender'], age: test_input['age'],
+                occupation: test_input['occupation'], zip_input: test_input['zip']
+            }
+        )
+        index.reset()
+        index.add(eval_all_item_emb)
+        _, I = index.search(np.ascontiguousarray(eval_user_emb), MATCH_NUMS)
+        hr, ndcg = compute_metrics(I, test_input['uid'], test_input['iid'])
+        curr_time = time()
+        time_elapsed = curr_time - prev_time
+        prev_time = curr_time
+        print(f'-------------test_loss of epoch-{epoch}: {val_loss:.8f}, \
+            tiem elapsed: {time_elapsed:.2f}s -------------')
+        print(f'-------------------------- hr: {hr:.6f}, \
+                ndcg: {ndcg:.6f}. --------------------------')

@@ -22,6 +22,8 @@ MATCH_NUMS = 50
 
 if __name__ == '__main__':
 
+    sess = tf.Session()
+
     timestamp = strftime("%Y%m%d_%H%M%S", localtime())
     ckpt_path = './ckpts/' + timestamp
     log_path = './logs/' + timestamp
@@ -41,23 +43,14 @@ if __name__ == '__main__':
     train_input, val_input = gen_model_input(train_dataset, user_profile, item_profile, SEQ_LEN, VALIDATION_SPLIT)
     test_input, _ = gen_model_input(test_dataset, user_profile, item_profile, SEQ_LEN)
 
-    uid = tf.placeholder(tf.int64, shape=[None, 1], name='uid')
-    lable = tf.placeholder(tf.int64, shape=[None, 1], name='lable')
-    hist_item_seq = tf.placeholder(tf.int64, shape=[None, SEQ_LEN], name='hist_item_seq')
-    hist_item_len = tf.placeholder(tf.int64, shape=[None, 1], name='hist_item_len')
-    gender = tf.placeholder(tf.int64, shape=[None, 1], name='gender')
-    age = tf.placeholder(tf.int64, shape=[None, 1], name='age')
-    occupation = tf.placeholder(tf.int64, shape=[None, 1], name='occupation')
-    zip_input = tf.placeholder(tf.int64, shape=[None, 1], name='zip')
-
-    # uid = keras.Input(shape=[1,], dtype=tf.int64, name='uid')
-    # lable = keras.Input(shape=[1,], dtype=tf.float32, name='lable')
-    # hist_item_seq = keras.Input(shape=[SEQ_LEN,], dtype=tf.int64, name='hist_item_seq')
-    # hist_item_len = keras.Input(shape=[1,], dtype=tf.int64, name='hist_item_len')
-    # gender = keras.Input(shape=[1,], dtype=tf.int64, name='gender')
-    # age = keras.Input(shape=[1,], dtype=tf.int64, name='age')
-    # occupation = keras.Input(shape=[1,], dtype=tf.int64, name='occupation')
-    # zip_input = keras.Input(shape=[1,], dtype=tf.int64, name='zip')
+    uid = keras.Input(shape=[1,], dtype=tf.int64, name='uid')
+    lable = keras.Input(shape=[1,], dtype=tf.float32, name='lable')
+    hist_item_seq = keras.Input(shape=[SEQ_LEN,], dtype=tf.int64, name='hist_item_seq')
+    hist_item_len = keras.Input(shape=[1,], dtype=tf.int64, name='hist_item_len')
+    gender = keras.Input(shape=[1,], dtype=tf.int64, name='gender')
+    age = keras.Input(shape=[1,], dtype=tf.int64, name='age')
+    occupation = keras.Input(shape=[1,], dtype=tf.int64, name='occupation')
+    zip_input = keras.Input(shape=[1,], dtype=tf.int64, name='zip')
 
     uid_emb_layer = keras.layers.Embedding(
         user_size, EMB_DIM, embeddings_initializer=keras.initializers.TruncatedNormal(), mask_zero=True
@@ -126,8 +119,8 @@ if __name__ == '__main__':
     embedding_index = EmbeddingIndex()
     all_item_emb = iid_emb_layer(embedding_index(item_size))
 
-    bias = tf.get_variable(name='bias', shape=[item_size,], initializer=tf.initializers.zeros(), trainable=False)
     iid = keras.Input(shape=[1,], dtype=tf.int64, name='iid')
+    bias = tf.get_variable(name='bias', shape=[item_size,], initializer=tf.initializers.zeros(), trainable=False)
     loss = tf.nn.sampled_softmax_loss(
         weights=all_item_emb,
         biases=bias,
@@ -152,28 +145,28 @@ if __name__ == '__main__':
             print('1')
             total_loss = 0.0
             model.save_weights(ckpt_path + f'/{epoch}')
-            for i in range(batch_num):
-                batch_loss, _ = sess.run(
-                    [
-                        loss, train_op
-                    ],
-                    feed_dict={
-                        uid: train_input['uid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        iid: train_input['iid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        hist_item_seq: train_input['hist_item_seq'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        hist_item_len: train_input['hist_item_len'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        gender: train_input['gender'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        age: train_input['age'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        occupation: train_input['occupation'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        zip_input: train_input['zip'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE]
-                    }
-                )
-                # print(f'/r------------- batch_loss: {batch_loss} -------------')
-                total_loss += batch_loss
-            print('2')
-            print(f'---------------------- total_loss of epoch-{epoch + 1}: {total_loss / batch_num}. ----------------------')
-            if val_size == 0:
-                continue
+            # for i in range(batch_num):
+            #     batch_loss, _ = sess.run(
+            #         [
+            #             loss, train_op
+            #         ],
+            #         feed_dict={
+            #             uid: train_input['uid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+            #             iid: train_input['iid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+            #             hist_item_seq: train_input['hist_item_seq'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+            #             hist_item_len: train_input['hist_item_len'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+            #             gender: train_input['gender'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+            #             age: train_input['age'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+            #             occupation: train_input['occupation'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+            #             zip_input: train_input['zip'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE]
+            #         }
+            #     )
+            #     # print(f'/r------------- batch_loss: {batch_loss} -------------')
+            #     total_loss += batch_loss
+            # print('2')
+            # print(f'---------------------- total_loss of epoch-{epoch + 1}: {total_loss / batch_num}. ----------------------')
+            # if val_size == 0:
+            #     continue
             val_loss, val_user_emb, val_all_item_emb = sess.run(
                 [loss, user_emb, all_item_emb],
                 feed_dict={

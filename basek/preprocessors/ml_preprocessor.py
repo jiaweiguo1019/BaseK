@@ -24,6 +24,10 @@ def read_csv(data_path):
     return data
 
 
+# def read_csv(data_path):
+#     return pd.read_csv('./datasets/movielens_sample.txt')
+
+
 def index_sparse_features(data, sparse_features):
     max_idx = {}
     for sp in sparse_features:

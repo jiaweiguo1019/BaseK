@@ -16,13 +16,11 @@ NEG_SAMPLES = 0
 VALIDATION_SPLIT = 0.1
 EMB_DIM = 32
 EPOCHS = 10
-BATCH_SIZE = 1024
+BATCH_SIZE = 256
 MATCH_NUMS = 50
 
 
 if __name__ == '__main__':
-
-    sess = tf.Session()
 
     timestamp = strftime("%Y%m%d_%H%M%S", localtime())
     ckpt_path = './ckpts/' + timestamp
@@ -103,9 +101,9 @@ if __name__ == '__main__':
     )([uid_emb, hist_item_seq_emb, gender_emb, age_emb, occupation_emb, zip_emb])
     all_embs = keras.layers.Flatten()(all_embs)
 
-    hidden_1 = keras.layers.Dense(32, 'relu')(all_embs)
-    hidden_2 = keras.layers.Dense(32, 'relu')(hidden_1)
-    hidden_3 = keras.layers.Dense(32, 'relu')(hidden_2)
+    hidden_1 = keras.layers.Dense(1024, 'relu')(all_embs)
+    hidden_2 = keras.layers.Dense(512, 'relu')(hidden_1)
+    hidden_3 = keras.layers.Dense(256, 'relu')(hidden_2)
     final_out = keras.layers.Dense(EMB_DIM)(hidden_3)
 
     model = keras.Model(
@@ -139,61 +137,54 @@ if __name__ == '__main__':
         sess.run(tf.initializers.global_variables())
         train_size = train_input['size']
         val_size = val_input['size']
-        batch_num = (train_size - 1) // BATCH_SIZE + 1
-        best_val_loss = float('inf')
         for epoch in range(EPOCHS):
-            print('1')
             total_loss = 0.0
             model.save_weights(ckpt_path + f'/{epoch}')
-            # for i in range(batch_num):
-            #     batch_loss, _ = sess.run(
-            #         [
-            #             loss, train_op
-            #         ],
-            #         feed_dict={
-            #             uid: train_input['uid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-            #             iid: train_input['iid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-            #             hist_item_seq: train_input['hist_item_seq'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-            #             hist_item_len: train_input['hist_item_len'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-            #             gender: train_input['gender'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-            #             age: train_input['age'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-            #             occupation: train_input['occupation'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-            #             zip_input: train_input['zip'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE]
-            #         }
-            #     )
-            #     # print(f'/r------------- batch_loss: {batch_loss} -------------')
-            #     total_loss += batch_loss
-            # print('2')
-            # print(f'---------------------- total_loss of epoch-{epoch + 1}: {total_loss / batch_num}. ----------------------')
-            # if val_size == 0:
-            #     continue
+            train_size = train_input['size']
+            val_size = val_input['size']
+            batch_num = (train_size - 1) // BATCH_SIZE + 1
+            best_val_loss = float('inf')
+            for i in range(batch_num):
+                batch_loss, _ = sess.run(
+                    [
+                        loss, train_op
+                    ],
+                    feed_dict={
+                        uid: train_input['uid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        iid: train_input['iid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        hist_item_seq: train_input['hist_item_seq'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        hist_item_len: train_input['hist_item_len'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        gender: train_input['gender'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        age: train_input['age'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        occupation: train_input['occupation'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        zip_input: train_input['zip'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                    }
+                )
+                total_loss += batch_loss
+            print(f'---------------------- total_loss of epoch-{epoch}: {total_loss / batch_num} ----------------------')
+            if val_size == 0:
+                continue
             val_loss, val_user_emb, val_all_item_emb = sess.run(
                 [loss, user_emb, all_item_emb],
                 feed_dict={
-                    uid: val_input['uid'],
-                    iid: val_input['iid'],
-                    hist_item_seq: val_input['hist_item_seq'],
-                    hist_item_len: val_input['hist_item_len'],
-                    gender: val_input['gender'],
-                    age: val_input['age'],
-                    occupation: val_input['occupation'],
-                    zip_input: val_input['zip']
+                    uid: val_input['uid'], iid: val_input['iid'],
+                    hist_item_seq: val_input['hist_item_seq'], hist_item_len: val_input['hist_item_len'],
+                    gender: val_input['gender'], age: val_input['age'], occupation: val_input['occupation'], zip_input: val_input['zip'],
                 }
             )
-            print('3')
-            print(f'---------------------- val_loss of epoch-{epoch + 1}: {val_loss}. ----------------------')
+            print(f'---------------------- val_loss of epoch-{epoch}: {val_loss} ----------------------')
             # faiss.normalize_L2(val_user_emb)
             # faiss.normalize_L2(val_all_item_emb)
-            index = index = faiss.IndexFlatIP(EMB_DIM)
+            index = faiss.IndexFlatIP(EMB_DIM)
             index.add(val_all_item_emb)
             D, I = index.search(np.ascontiguousarray(val_user_emb), MATCH_NUMS)
             hits, ndcgs = [], []
-            for i, (uid, iid) in tqdm(enumerate(zip(val_input['uid'], val_input['iid']))):
-                    uid, iid = uid[0], iid[0]
+            for i, (val_uid, val_iid) in tqdm(enumerate(zip(val_input['uid'], val_input['iid']))):
+                    val_uid, val_iid = val_uid[0], val_iid[0]
                     pred = I[i]
                     ndcg, hit = 0, 0
                     for idx, pred_i in enumerate(pred):
-                        if pred_i == iid:
+                        if pred_i == val_iid:
                             ndcg = np.log(2) / np.log(idx + 2)
                             hit = 1
                             break
@@ -206,5 +197,3 @@ if __name__ == '__main__':
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 model.save_weights(ckpt_path + '/best')
-            print('4')
-

@@ -39,7 +39,7 @@ def read_raw_data(data_path, sparse_features):
     return data, max_idx
 
 
-def gen_data_set(data, neg_samples=0):
+def gen_dataset(data, neg_samples=0):
 
     data.sort_values('timestamp', inplace=True)
     item_ids = data['movie_id'].unique()
@@ -107,32 +107,38 @@ def gen_model_input(dataset, user_profile, item_profile, seq_max_len, validaton_
     occupation = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
     zip = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
 
+    total_size = uid.shape[0]
+
     if validaton_split is not None:
         if not isinstance(validaton_split, float) or validaton_split <= 0.0:
             raise ValueError(
                 'validaton_split should be a float in the (0, 1) range!'
             )
-        data_idx = np.arange(uid.shape[0])
+        data_idx = np.arange(total_size)
         train_idx, val_idx = train_test_split(data_idx, test_size=validaton_split, shuffle=False)
         train_dataset = {
             'uid': uid[train_idx], 'iid': iid[train_idx], 'label': label[train_idx],
             'hist_item_seq': padded_hist_item_seq[train_idx], 'hist_item_len': hist_item_len[train_idx],
             'gender': gender[train_idx], 'age': age[train_idx],
-            'occupation': occupation[train_idx], 'zip': zip[train_idx]
+            'occupation': occupation[train_idx], 'zip': zip[train_idx],
+            'size': len(train_idx)
         }
         val_dataset = {
             'uid': uid[val_idx], 'iid': iid[val_idx], 'label': label[val_idx],
             'hist_item_seq': padded_hist_item_seq[val_idx], 'hist_item_len': hist_item_len[val_idx],
             'gender': gender[val_idx], 'age': age[val_idx],
-            'occupation': occupation[val_idx], 'zip': zip[val_idx]
+            'occupation': occupation[val_idx], 'zip': zip[val_idx],
+            'size': len(val_idx)
         }
-        return train_dataset, val_dataset
+
     else:
-        all_dataset = {
+        train_dataset = {
             'uid': uid, 'iid': iid, 'label': label,
             'hist_item_seq': padded_hist_item_seq, 'hist_item_len': hist_item_len,
             'gender': gender, 'age': age,
-            'occupation': occupation, 'zip': zip
+            'occupation': occupation, 'zip': zip,
+            'size': total_size
         }
-        return all_dataset, {}
+        val_dataset = {'size': 0}
+    return train_dataset, val_dataset
 

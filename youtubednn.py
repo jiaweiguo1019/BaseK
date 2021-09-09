@@ -124,7 +124,7 @@ if __name__ == '__main__':
         biases=bias,
         labels=iid,
         inputs=user_emb,
-        num_sampled=5,
+        num_sampled=16,
         num_classes=item_size
     )
     loss = tf.reduce_mean(loss)
@@ -133,11 +133,16 @@ if __name__ == '__main__':
     grads = tf.gradients(loss, model_vars)
     train_op = optimizer.apply_gradients(zip(grads, model_vars))
 
-    with tf.Session() as sess:
+    config = tf.ConfigProto()
+    config.allow_soft_placement = True
+    config.gpu_options.allow_growth = True
+    with tf.Session(config=config) as sess:
         sess.run(tf.initializers.global_variables())
         train_size = train_input['size']
         val_size = val_input['size']
+
         for epoch in range(EPOCHS):
+            prev_time = time()
             total_loss = 0.0
             model.save_weights(ckpt_path + f'/{epoch}')
             train_size = train_input['size']
@@ -161,7 +166,11 @@ if __name__ == '__main__':
                     }
                 )
                 total_loss += batch_loss
-            print(f'---------------------- total_loss of epoch-{epoch}: {total_loss / batch_num} ----------------------')
+            curr_time = time()
+            time_elapsed = curr_time - prev_time
+            prev_time = curr_time
+            print(f'------------- total_loss of epoch-{epoch}: {total_loss / batch_num}, \
+                tiem elapsed: {time_elapsed} -------------')
             if val_size == 0:
                 continue
             val_loss, val_user_emb, val_all_item_emb = sess.run(
@@ -172,7 +181,6 @@ if __name__ == '__main__':
                     gender: val_input['gender'], age: val_input['age'], occupation: val_input['occupation'], zip_input: val_input['zip'],
                 }
             )
-            print(f'---------------------- val_loss of epoch-{epoch}: {val_loss} ----------------------')
             # faiss.normalize_L2(val_user_emb)
             # faiss.normalize_L2(val_all_item_emb)
             index = faiss.IndexFlatIP(EMB_DIM)
@@ -192,8 +200,13 @@ if __name__ == '__main__':
                     ndcgs.append(ndcg)
 
             # print("recall", np.mean(s))
+            curr_time = time()
+            time_elapsed = curr_time - prev_time
+            print(f'------------- val_loss of epoch-{epoch}: {val_loss}, \
+                tiem elapsed: {time_elapsed} -------------')
             print("hr", np.mean(hits))
             print('ndcg', np.mean(ndcgs))
+
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 model.save_weights(ckpt_path + '/best')

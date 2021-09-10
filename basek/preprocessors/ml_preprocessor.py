@@ -7,25 +7,26 @@ from sklearn.model_selection import train_test_split
 from basek.utils.tf_compat import keras
 
 
-def read_csv(data_path):
-    user_names = ['user_id', 'gender', 'age', 'occupation', 'zip']
-    users = pd.read_csv(
-        data_path + '/users.dat', sep='::', header=None, names=user_names, encoding='latin-1'
-    )
-    rating_names = ['user_id', 'movie_id', 'rating', 'timestamp']
-    ratings = pd.read_csv(
-        data_path + '/ratings.dat', sep='::', header=None, names=rating_names, encoding='latin-1'
-    )
-    movie_names = ['movie_id', 'title', 'genres']
-    movies = pd.read_csv(
-        data_path + '/movies.dat', sep='::', header=None, names=movie_names, encoding='latin-1'
-    )
-    data = pd.merge(pd.merge(ratings, movies), users)
-    return data
-
-
 # def read_csv(data_path):
-#     return pd.read_csv('./datasets/movielens_sample.txt')
+#     user_names = ['user_id', 'gender', 'age', 'occupation', 'zip']
+#     users = pd.read_csv(
+#         data_path + '/users.dat', sep='::', header=None, names=user_names, encoding='latin-1'
+#     )
+#     rating_names = ['user_id', 'movie_id', 'rating', 'timestamp']
+#     ratings = pd.read_csv(
+#         data_path + '/ratings.dat', sep='::', header=None, names=rating_names, encoding='latin-1'
+#     )
+#     movie_names = ['movie_id', 'title', 'genres']
+#     movies = pd.read_csv(
+#         data_path + '/movies.dat', sep='::', header=None, names=movie_names, encoding='latin-1'
+#     )
+#     data = pd.merge(pd.merge(ratings, movies), users)
+#     return data
+
+
+def read_csv(data_path):
+    return pd.read_csv('./datasets/movielens/ml-1m_merged.csv', sep='^')
+    # return pd.read_csv('./datasets/movielens_sample.txt')
 
 
 def index_sparse_features(data, sparse_features):
@@ -43,7 +44,17 @@ def read_raw_data(data_path, sparse_features):
     return data, max_idx
 
 
-def gen_dataset(data, neg_samples=0):
+def split_dataset(dataset, validaton_split):
+    if not isinstance(validaton_split, float) or validaton_split <= 0.0:
+        raise ValueError('validaton_split should be a float in the (0, 1) range!')
+    total_size = len(dataset)
+    train_size = int(np.ceil(total_size * (1.0 - validaton_split)))
+    train_dataset = dataset[:train_size]
+    val_dataset = dataset[train_size:]
+    return train_dataset, val_dataset
+
+
+def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
 
     data.sort_values('timestamp', inplace=True)
     item_ids = data['movie_id'].unique()
@@ -54,10 +65,13 @@ def gen_dataset(data, neg_samples=0):
     item_profile = data[['movie_id']].drop_duplicates('movie_id')
 
     train_dataset = []
+    neg_sample_dataset = []
     test_dataset = []
+    pos_label = 1.0
+    neg_label = 0.0
+    pos_weight = 1.0
+    neg_weight = neg_weight
     for uid, hist in tqdm(data.groupby('user_id')):
-        pos_label = 1.0
-        neg_label = 0.0
         hist_item_seq = hist['movie_id'].tolist()
         hist_rating_seq = hist['rating'].tolist()
         # TODO: sample negative samples once or per positive sample
@@ -71,79 +85,81 @@ def gen_dataset(data, neg_samples=0):
             iid = hist_item_seq[i]
             if i != len(hist_item_seq) - 1:
                 train_dataset.append(
-                    (uid, iid, pos_label, hist_item_sub_seq[:], len(hist_item_sub_seq), hist_rating_seq[i])
+                    (
+                        uid, iid, pos_label,
+                        hist_item_sub_seq[:], len(hist_item_sub_seq), pos_weight, hist_rating_seq[i]
+                    )
                 )
                 for neg_i in range(neg_samples):
-                    train_dataset.append(
-                        (uid, neg_list[i * neg_samples + neg_i], neg_label, hist[::-1], 0,len(hist[::-1]))
+                    neg_sample_dataset.append(
+                        (
+                            uid, neg_list[i * neg_samples + neg_i], neg_label,
+                            hist_item_sub_seq[:], len(hist_item_sub_seq), neg_weight
+                        )
                     )
             else:
                 test_dataset.append(
-                    (uid, iid, pos_label, hist_item_sub_seq[:], len(hist_item_sub_seq), hist_rating_seq[i])
+                    (
+                        uid, iid, pos_label,
+                        hist_item_sub_seq[:], len(hist_item_sub_seq), pos_weight, hist_rating_seq[i]
+                    )
                 )
 
     np.random.shuffle(train_dataset)
+    np.random.shuffle(neg_sample_dataset)
     # np.random.shuffle(test_dataset)
 
+    if validaton_split is not None:
+        train_dataset, val_dataset = split_dataset(train_dataset, validaton_split)
+    else:
+        train_dataset, val_dataset = train_dataset, []
+
+    train_dataset = train_dataset + neg_sample_dataset
     train_size = len(train_dataset)
+    val_size = len(val_dataset)
     test_size = len(test_dataset)
 
     print('-' * 120)
-    print(f'-------------------- {train_size} training samples, {test_size} testing samples. --------------------')
+    print('-' * 16 + f'  {train_size} training samples, {val_size} validation samples, {test_size} testing samples.    ' + '-' * 16)
 
-    return (train_dataset, test_dataset), (user_profile, item_profile)
+    return (train_dataset, val_dataset, test_dataset), (user_profile, item_profile)
 
 
-def gen_model_input(dataset, user_profile, item_profile, seq_max_len, validaton_split=None):
+def gen_model_input(dataset, user_profile, item_profile, seq_max_len, ):
 
-    uid = np.array([[line[0]] for line in dataset])
-    iid = np.array([[line[1]] for line in dataset])
-    label = np.array([[line[2]] for line in dataset])
-
-    hist_item_seq = [line[3] for line in dataset]
-    hist_item_len = np.array([[line[4]] for line in dataset])
+    total_size = len(dataset)
+    if total_size == 0:
+        return {'size': 0}
+    print(total_size)
+    uid, iid, label, hist_item_seq, hist_item_len, sample_weight = [], [], [], [], [], []
+    for line in tqdm(dataset):
+        uid.append(line[0])
+        iid.append(line[1])
+        label.append(line[2])
+        hist_item_seq.append(line[3])
+        hist_item_len.append(line[4])
+        sample_weight.append(line[5])
+    uid = np.array(uid)
+    iid = np.array(np.array(iid))
+    label = np.array(label)
+    hist_item_len = np.array(hist_item_len)
+    sample_weight = np.array(sample_weight)
 
     padded_hist_item_seq = keras.preprocessing.sequence.pad_sequences(
         hist_item_seq, maxlen=seq_max_len, padding='post', truncating='pre', value=0, dtype='int64'
     )
 
-    gender = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
-    age = user_profile.loc[uid.reshape(-1)]['age'].values.reshape(-1, 1)
-    occupation = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
-    zip = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
+    gender = user_profile.loc[uid]['gender'].values
+    age = user_profile.loc[uid]['age'].values
+    occupation = user_profile.loc[uid]['gender'].values
+    zip = user_profile.loc[uid]['gender'].values
 
-    total_size = uid.shape[0]
+    model_input = {
+        'uid': uid.reshape(-1, 1), 'iid': iid.reshape(-1, 1), 'label': label.reshape(-1, 1),
+        'hist_item_seq': padded_hist_item_seq, 'hist_item_len': hist_item_len.reshape(-1, 1),
+        'gender': gender.reshape(-1, 1), 'age': age.reshape(-1, 1),
+        'occupation': occupation.reshape(-1, 1), 'zip': zip.reshape(-1, 1),
+        'sample_weight': sample_weight.reshape(-1, 1), 'size': total_size
+    }
 
-    if validaton_split is not None:
-        if not isinstance(validaton_split, float) or validaton_split <= 0.0:
-            raise ValueError(
-                'validaton_split should be a float in the (0, 1) range!'
-            )
-        data_idx = np.arange(total_size)
-        train_idx, val_idx = train_test_split(data_idx, test_size=validaton_split, shuffle=False)
-        train_dataset = {
-            'uid': uid[train_idx], 'iid': iid[train_idx], 'label': label[train_idx],
-            'hist_item_seq': padded_hist_item_seq[train_idx], 'hist_item_len': hist_item_len[train_idx],
-            'gender': gender[train_idx], 'age': age[train_idx],
-            'occupation': occupation[train_idx], 'zip': zip[train_idx],
-            'size': len(train_idx)
-        }
-        val_dataset = {
-            'uid': uid[val_idx], 'iid': iid[val_idx], 'label': label[val_idx],
-            'hist_item_seq': padded_hist_item_seq[val_idx], 'hist_item_len': hist_item_len[val_idx],
-            'gender': gender[val_idx], 'age': age[val_idx],
-            'occupation': occupation[val_idx], 'zip': zip[val_idx],
-            'size': len(val_idx)
-        }
-
-    else:
-        train_dataset = {
-            'uid': uid, 'iid': iid, 'label': label,
-            'hist_item_seq': padded_hist_item_seq, 'hist_item_len': hist_item_len,
-            'gender': gender, 'age': age,
-            'occupation': occupation, 'zip': zip,
-            'size': total_size
-        }
-        val_dataset = {'size': 0}
-    return train_dataset, val_dataset
-
+    return model_input

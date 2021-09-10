@@ -139,7 +139,7 @@ if __name__ == '__main__':
     config = tf.ConfigProto()
     config.allow_soft_placement = True
     config.gpu_options.allow_growth = True
-    print('-' * 96)
+    print('-' * 120)
     with tf.Session(config=config) as sess:
         sess.run(tf.initializers.global_variables())
         train_size = train_input['size']
@@ -169,10 +169,11 @@ if __name__ == '__main__':
                     }
                 )
                 total_loss += batch_loss
+                print('\r' + '-' * 32 + f' batch_loss: {batch_loss:.8f} ' + '-' * 32, end='')
             curr_time = time()
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
-            print(f'------------- total_loss of epoch-{epoch}: {(total_loss / batch_num):.8f}, \
+            print(f'\n------------- total_loss of epoch-{epoch}: {(total_loss / batch_num):.8f}, \
                 tiem elapsed: {time_elapsed:.2f}s -------------')
             if val_size == 0:
                 continue
@@ -198,8 +199,7 @@ if __name__ == '__main__':
                 tiem elapsed: {time_elapsed:.2f}s -------------')
             print(f'-------------------------- hr: {hr:.6f}, \
                 ndcg: {ndcg:.6f}. --------------------------')
-            print('-' * 96)
-
+            print('-' * 120)
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss

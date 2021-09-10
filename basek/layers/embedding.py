@@ -3,16 +3,12 @@ from basek.utils.tf_compat import tf, keras
 
 class EmbeddingIndex(keras.layers.Layer):
 
-    def __init__(self, **kwargs):
+    def __init__(self, max_idx, **kwargs):
+        self.max_idx = max_idx
         super().__init__(**kwargs)
 
-    def build(self, input_shape):
-        # Be sure to call this somewhere!
-        super().build(input_shape)
-
     def call(self, index):
-        self.index = index
-        index = list(range(self.index))
+        index = list(range(self.max_idx))
         return tf.constant(index, dtype=tf.int64)
 
     def get_config(self, ):

@@ -169,12 +169,12 @@ if __name__ == '__main__':
                     }
                 )
                 total_loss += batch_loss
-                print('\r' + '-' * 32 + f' batch_loss: {batch_loss:.8f} ' + '-' * 32, end='')
+                print('\r' + '-' * 36 + f' batch_loss: {batch_loss:.8f} ' + '-' * 36, end='')
             curr_time = time()
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
-            print(f'\n------------- total_loss of epoch-{epoch}: {(total_loss / batch_num):.8f}, \
-                tiem elapsed: {time_elapsed:.2f}s -------------')
+            print(f'\ntotal_loss of epoch-{epoch}: {(total_loss / batch_num):.8f}    ' +
+                '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
             if val_size == 0:
                 continue
             val_loss, val_user_emb, val_all_item_emb = sess.run(
@@ -195,10 +195,9 @@ if __name__ == '__main__':
             curr_time = time()
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
-            print(f'------------- val_loss of epoch-{epoch}: {val_loss:.8f}, \
-                tiem elapsed: {time_elapsed:.2f}s -------------')
-            print(f'-------------------------- hr: {hr:.6f}, \
-                ndcg: {ndcg:.6f}. --------------------------')
+            print(f'val_loss of epoch-{epoch}: {(val_loss / batch_num):.8f}    ' +
+                '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
+            print(f'-' * 36 +  f'hr: {hr:.6f}, ndcg: {ndcg:.6f}.' +  '-' * 36)
             print('-' * 120)
 
             if val_loss < best_val_loss:
@@ -221,7 +220,7 @@ if __name__ == '__main__':
         curr_time = time()
         time_elapsed = curr_time - prev_time
         prev_time = curr_time
-        print(f'-------------test_loss of epoch-{epoch}: {val_loss:.8f}, \
+        print('-' * 120)
+        print(f'-------------test_loss of: {eval_loss:.8f}, \
             tiem elapsed: {time_elapsed:.2f}s -------------')
-        print(f'-------------------------- hr: {hr:.6f}, \
-                ndcg: {ndcg:.6f}. --------------------------')
+        print(f'-' * 36 +  f'hr: {hr:.6f}, ndcg: {ndcg:.6f}.' +  '-' * 36)

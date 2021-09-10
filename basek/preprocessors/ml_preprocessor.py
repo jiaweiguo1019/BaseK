@@ -89,7 +89,7 @@ def gen_dataset(data, neg_samples=0):
     test_size = len(test_dataset)
 
     print('-' * 120)
-    print(f'-------------------- {train_size} training samples, {test_size} testing samples. --------------------')
+    print('-' * 24 + f'  {train_size} training samples, {test_size} testing samples.    ' + '-' * 24)
 
     return (train_dataset, test_dataset), (user_profile, item_profile)
 

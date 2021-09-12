@@ -1,3 +1,5 @@
+import numpy as np
+
 from basek.utils.tf_compat import keras, tf
 
 
@@ -43,7 +45,7 @@ class Index(Layer):
         super().__init__(**kwargs)
 
     def call(self):
-        index = list(range(self.max_idx))
+        index = np.arange(self.max_idx).reshape(-1, 1)
         return tf.constant(index, dtype=tf.int64)
 
     def __call__(self):

@@ -14,8 +14,8 @@ from basek.layers.base import BiasAdd, Concatenate, Dense, Embedding, Flatten, I
 
 
 SEQ_LEN = 50
+VALIDATION_SPLIT = True
 NEG_SAMPLES = 0
-VALIDATION_SPLIT = 0.1
 EMB_DIM = 32
 EPOCHS = 1000
 BATCH_SIZE = 256
@@ -113,22 +113,22 @@ if __name__ == '__main__':
     )([uid_emb, hist_item_seq_emb, gender_emb, age_emb, occupation_emb, zip_emb])
     all_embs = Flatten()(all_embs)
 
-    hidden_1 = Dense(1024, 'relu', name='hidden_1')(all_embs)
-    hidden_2 = Dense(512, 'relu', name='hidden_2')(hidden_1)
-    hidden_3 = Dense(256, 'relu', name='hidden_3')(hidden_2)
-    final_out = Dense(EMB_DIM, name='user_out')(hidden_3)
+    user_hidden_1 = Dense(1024, 'relu', name='user_hidden_1')(all_embs)
+    user_hidden_2 = Dense(512, 'relu', name='user_hidden_2')(user_hidden_1)
+    user_hidden_3 = Dense(256, 'relu', name='user_hidden_3')(user_hidden_2)
+    user_out = Dense(EMB_DIM, name='user_out')(user_hidden_3)
 
     model = keras.Model(
         inputs=[uid, hist_item_seq, hist_item_len, gender, age, occupation, zip_input],
-        outputs=[final_out]
+        outputs=[user_out]
     )
     print('=' * 120)
     model.summary()
 
     # for evaluate
-    user_emb = model([uid, hist_item_seq, hist_item_len, gender, age, occupation, zip_input])
     all_item_index = Index(item_size)
     all_item_emb = iid_emb_layer(all_item_index())
+    all_item_emb = Flatten()(all_item_emb)
     index = faiss.IndexFlatIP(EMB_DIM)
 
     # definde loss and train_op
@@ -138,12 +138,12 @@ if __name__ == '__main__':
         weights=all_item_emb,
         biases=bias,
         labels=iid,
-        inputs=user_emb,
+        inputs=user_out,
         num_sampled=160,
         num_classes=item_size
     )
     loss = tf.reduce_mean(loss)
-    optimizer = keras.optimizers.Adam()
+    optimizer = keras.optimizers.Adagrad()
     model_vars = tf.trainable_variables()
     grads = tf.gradients(loss, model_vars)
     train_op = optimizer.apply_gradients(zip(grads, model_vars))
@@ -160,23 +160,26 @@ if __name__ == '__main__':
         batch_num = (train_size - 1) // BATCH_SIZE + 1
         best_val_loss = float('inf')
         prev_time = time()
+        all_idx = np.arange(train_size)
         for epoch in range(EPOCHS):
             total_loss = 0.0
             model.save_weights(ckpt_path + f'/{epoch}')
+            np.random.shuffle(all_idx)
             for i in range(batch_num):
+                batch_idx = all_idx[i * BATCH_SIZE: (i + 1) * BATCH_SIZE]
                 batch_loss, _ = sess.run(
                     [
                         loss, train_op
                     ],
                     feed_dict={
-                        uid: train_input['uid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        iid: train_input['iid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        hist_item_seq: train_input['hist_item_seq'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        hist_item_len: train_input['hist_item_len'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        gender: train_input['gender'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        age: train_input['age'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        occupation: train_input['occupation'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        zip_input: train_input['zip'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        uid: train_input['uid'][batch_idx],
+                        iid: train_input['iid'][batch_idx],
+                        hist_item_seq: train_input['hist_item_seq'][batch_idx],
+                        hist_item_len: train_input['hist_item_len'][batch_idx],
+                        gender: train_input['gender'][batch_idx],
+                        age: train_input['age'][batch_idx],
+                        occupation: train_input['occupation'][batch_idx],
+                        zip_input: train_input['zip'][batch_idx],
                     }
                 )
                 total_loss += batch_loss
@@ -189,7 +192,7 @@ if __name__ == '__main__':
             if val_size == 0:
                 continue
             val_loss, val_user_emb, val_all_item_emb = sess.run(
-                [loss, user_emb, all_item_emb],
+                [loss, user_out, all_item_emb],
                 feed_dict={
                     uid: val_input['uid'], iid: val_input['iid'],
                     hist_item_seq: val_input['hist_item_seq'], hist_item_len: val_input['hist_item_len'],
@@ -216,7 +219,7 @@ if __name__ == '__main__':
                 model.save_weights(ckpt_path + '/best')
 
         eval_loss, eval_user_emb, eval_all_item_emb = sess.run(
-            [loss, user_emb, all_item_emb],
+            [loss, user_out, all_item_emb],
             feed_dict={
                 uid: test_input['uid'], iid: test_input['iid'],
                 hist_item_seq: test_input['hist_item_seq'], hist_item_len: test_input['hist_item_len'],

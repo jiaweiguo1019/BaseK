@@ -202,10 +202,15 @@ if __name__ == '__main__':
     model.summary()
 
     # for evaluate
-    user_emb = model([uid, hist_item_seq, hist_item_len, gender, age, occupation, zip_input])
     all_item_index = Index(item_size)
-    all_item_emb = iid_emb_layer(all_item_index())
-    index = faiss.IndexFlatIP(EMB_DIM)
+    all_item_emb = linear_iid_emb_layer(all_item_index())
+
+    uid_emb_squeezed = tf.squeeze(uid_emb, axis=1)
+    uid_bias_squeezed = tf.squeeze(uid_bias, axis=1)
+    uid_emb_prob_all_item = tf.matmul(uid_emb_squeezed, all_item_emb, transpose_b=True)
+    added_score_all_item = uid_emb_prob_all_item + uid_bias_squeezed + tf.transpose(all_item_bias)
+    final_score = bias_add_layer(added_score_all_item)
+
 
     # definde loss and train_op
     iid = keras.Input(shape=[1,], dtype=tf.int64, name='iid')

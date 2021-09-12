@@ -8,13 +8,14 @@ from tqdm import tqdm
 
 from basek.params import args
 from basek.preprocessors.ml_preprocessor import read_raw_data, gen_dataset, gen_model_input
-from basek.layers.base import BiasAdd, Index
 from basek.utils.metrics import compute_metrics
 from basek.utils.tf_compat import tf, keras
 
+from basek.layers.base import BiasAdd, Concatenate, Dense, Embedding, Flatten, Index, Input, Lambda
 
 SEQ_LEN = 50
-NEG_SAMPLES = 5
+# NEG_SAMPLES = 5
+NEG_SAMPLES = 0
 NEG_WEIGHT = 0.2
 VALIDATION_SPLIT = 0.1
 EMB_DIM = 32
@@ -31,7 +32,7 @@ if __name__ == '__main__':
     user_size = sparse_features_max_idx['user_id']
     item_size = sparse_features_max_idx['movie_id']
 
-    datasets, profiles =  gen_dataset(data, VALIDATION_SPLIT, NEG_SAMPLES)
+    datasets, profiles =  gen_dataset(data, VALIDATION_SPLIT, NEG_SAMPLES, NEG_WEIGHT)
     train_dataset, val_dataset, test_dataset = datasets
     user_profile, item_profile = profiles
 
@@ -90,7 +91,7 @@ if __name__ == '__main__':
         lambda x: tf.nn.sigmoid(x), name='sigmoid'
     )(logits)
 
-    model = keras.Model(inputs=[uid, iid], outputs=[pred_prob])
+    model = keras.Model(inputs=[uid, iid], outputs=[logits])
     print('=' * 120)
     model.summary()
 
@@ -109,9 +110,10 @@ if __name__ == '__main__':
     label = keras.Input(shape=[1,], dtype=tf.float32, name='label')
     sample_weight = keras.Input(shape=[1,], dtype=tf.float32, name='sample_weight')
 
-    loss = -sample_weight * (label * tf.log(pred_prob) + (1.0 - label) * tf.log(1.0 - pred_prob))
+    # loss = -sample_weight * (label * tf.log(pred_prob) + (1.0 - label) * tf.log(1.0 - pred_prob))
+    loss = (label - logits) ** 2
     loss = tf.reduce_mean(loss)
-    optimizer = keras.optimizers.Adam()
+    optimizer = keras.optimizers.RMSprop(0.0001)
     model_vars = tf.trainable_variables()
     grads = tf.gradients(loss, model_vars)
     train_op = optimizer.apply_gradients(zip(grads, model_vars))
@@ -139,7 +141,8 @@ if __name__ == '__main__':
                     feed_dict={
                         uid: train_input['uid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
                         iid: train_input['iid'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
-                        label: train_input['label'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        # label: train_input['label'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
+                        label: train_input['feedback'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE],
                         sample_weight: train_input['sample_weight'][i * BATCH_SIZE: (i + 1) * BATCH_SIZE]
                     }
                 )
@@ -149,7 +152,7 @@ if __name__ == '__main__':
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
             print(f'\ntrain_loss of epoch-{epoch + 1}: {(total_loss / batch_num):.8f}    ' +
-                '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
+                  '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
             if val_size == 0:
                 continue
             val_loss, val_score = sess.run(
@@ -157,20 +160,21 @@ if __name__ == '__main__':
                 feed_dict={
                     uid: val_input['uid'],
                     iid: val_input['iid'],
-                    label: val_input['label'],
+                    # label: val_input['label'],
+                    label: val_input['feedback'],
                     sample_weight: val_input['sample_weight']
                 }
             )
 
             I = np.argsort(val_score)
-            I = I[:, :MATCH_NUMS]
+            I = I[:, ::-1][:, :MATCH_NUMS]
             hr, ndcg = compute_metrics(I, val_input['uid'], val_input['iid'])
             curr_time = time()
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
             print(f'val_loss  of  epoch-{epoch + 1}: {val_loss:.8f}    ' +
-                '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
-            print(f'-' * 32 +  f'   hr: {hr:.6f}, ndcg: {ndcg:.6f}   ' +  '-' * 32)
+                  '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
+            print('-' * 32 + f'   hr: {hr:.6f}, ndcg: {ndcg:.6f}   ' + '-' * 32)
             print('=' * 120)
 
             if val_loss < best_val_loss:
@@ -181,13 +185,14 @@ if __name__ == '__main__':
             [loss, final_score],
             feed_dict={
                 uid: test_input['uid'],
-                iid: val_input['iid'],
-                label: val_input['label'],
-                sample_weight: val_input['sample_weight']
+                iid: test_input['iid'],
+                # label: test_input['label'],
+                label: test_input['feedback'],
+                sample_weight: test_input['sample_weight']
             }
         )
         I = np.argsort(val_score)
-        I = I[:, :MATCH_NUMS]
+        I = I[:, ::-1][:, :MATCH_NUMS]
         hr, ndcg = compute_metrics(I, test_input['uid'], test_input['iid'])
         curr_time = time()
         time_elapsed = curr_time - prev_time
@@ -195,4 +200,4 @@ if __name__ == '__main__':
         print('=' * 120)
         print(f'-------------test_loss of: {eval_loss:.8f}, \
             tiem elapsed: {time_elapsed:.2f}s -------------')
-        print(f'-' * 32 +  f'   hr: {hr:.6f}, ndcg: {ndcg:.6f}   ' +  '-' * 32)
+        print('-' * 32 + f'   hr: {hr:.6f}, ndcg: {ndcg:.6f}   ' + '-' * 32)

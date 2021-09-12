@@ -54,7 +54,7 @@ def split_dataset(dataset, validaton_split):
     return train_dataset, val_dataset
 
 
-def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
+def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0, neg_feedback=0.0):
 
     data.sort_values('timestamp', inplace=True)
     item_ids = data['movie_id'].unique()
@@ -71,6 +71,7 @@ def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
     neg_label = 0.0
     pos_weight = 1.0
     neg_weight = neg_weight
+    neg_feedback = neg_feedback
     for uid, hist in tqdm(data.groupby('user_id')):
         hist_item_seq = hist['movie_id'].tolist()
         hist_rating_seq = hist['rating'].tolist()
@@ -94,7 +95,7 @@ def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
                     neg_sample_dataset.append(
                         (
                             uid, neg_list[i * neg_samples + neg_i], neg_label,
-                            hist_item_sub_seq[:], len(hist_item_sub_seq), neg_weight
+                            hist_item_sub_seq[:], len(hist_item_sub_seq), neg_weight, neg_feedback
                         )
                     )
             else:
@@ -130,20 +131,22 @@ def gen_model_input(dataset, user_profile, item_profile, seq_max_len, ):
     total_size = len(dataset)
     if total_size == 0:
         return {'size': 0}
-    print(total_size)
-    uid, iid, label, hist_item_seq, hist_item_len, sample_weight = [], [], [], [], [], []
-    for line in tqdm(dataset):
+
+    uid, iid, label, hist_item_seq, hist_item_len, sample_weight, feedback = [], [], [], [], [], [], []
+    for line in dataset:
         uid.append(line[0])
         iid.append(line[1])
         label.append(line[2])
         hist_item_seq.append(line[3])
         hist_item_len.append(line[4])
         sample_weight.append(line[5])
+        feedback.append(line[6])
     uid = np.array(uid)
-    iid = np.array(np.array(iid))
+    iid = np.array(iid)
     label = np.array(label)
     hist_item_len = np.array(hist_item_len)
     sample_weight = np.array(sample_weight)
+    feedback = np.array(feedback)
 
     padded_hist_item_seq = keras.preprocessing.sequence.pad_sequences(
         hist_item_seq, maxlen=seq_max_len, padding='post', truncating='pre', value=0, dtype='int64'
@@ -159,7 +162,8 @@ def gen_model_input(dataset, user_profile, item_profile, seq_max_len, ):
         'hist_item_seq': padded_hist_item_seq, 'hist_item_len': hist_item_len.reshape(-1, 1),
         'gender': gender.reshape(-1, 1), 'age': age.reshape(-1, 1),
         'occupation': occupation.reshape(-1, 1), 'zip': zip.reshape(-1, 1),
-        'sample_weight': sample_weight.reshape(-1, 1), 'size': total_size
+        'sample_weight': sample_weight.reshape(-1, 1), 'feedback': feedback.reshape(-1, 1),
+        'size': total_size
     }
 
     return model_input

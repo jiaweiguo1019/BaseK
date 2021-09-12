@@ -144,3 +144,6 @@ datasets/
 # check point
 ckpts/
 *checkpoint*
+
+# vscode things
+.vscode/

@@ -7,9 +7,10 @@ from tqdm import tqdm
 
 from basek.params import args
 from basek.preprocessors.ml_preprocessor import read_raw_data, gen_dataset, gen_model_input
-from basek.layers.base import Index
 from basek.utils.metrics import compute_metrics
 from basek.utils.tf_compat import tf, keras
+
+from basek.layers.base import BiasAdd, Concatenate, Dense, Embedding, Flatten, Index, Input, Lambda
 
 
 SEQ_LEN = 50
@@ -23,13 +24,13 @@ MATCH_NUMS = 50
 
 if __name__ == '__main__':
 
-    data_path ='./datasets/movielens'
+    data_path = './datasets/movielens'
     sparse_features = ['user_id', 'movie_id', 'gender', 'age', 'occupation', 'zip']
     data, sparse_features_max_idx = read_raw_data(data_path, sparse_features)
     user_size = sparse_features_max_idx['user_id']
     item_size = sparse_features_max_idx['movie_id']
 
-    datasets, profiles =  gen_dataset(data, VALIDATION_SPLIT, NEG_SAMPLES)
+    datasets, profiles = gen_dataset(data, VALIDATION_SPLIT, NEG_SAMPLES)
     train_dataset, val_dataset, test_dataset = datasets
     user_profile, item_profile = profiles
 
@@ -46,41 +47,45 @@ if __name__ == '__main__':
     print('-' * 4 + f'  model weights are saved in {os.path.realpath(ckpt_path)}  ' + '-' * 4)
 
     # bulid model
-    uid = keras.Input(shape=[1,], dtype=tf.int64, name='uid')
-    label = keras.Input(shape=[1,], dtype=tf.float32, name='label')
-    hist_item_seq = keras.Input(shape=[SEQ_LEN,], dtype=tf.int64, name='hist_item_seq')
-    hist_item_len = keras.Input(shape=[1,], dtype=tf.int64, name='hist_item_len')
-    gender = keras.Input(shape=[1,], dtype=tf.int64, name='gender')
-    age = keras.Input(shape=[1,], dtype=tf.int64, name='age')
-    occupation = keras.Input(shape=[1,], dtype=tf.int64, name='occupation')
-    zip_input = keras.Input(shape=[1,], dtype=tf.int64, name='zip')
+    uid = Input(shape=[1, ], dtype=tf.int64, name='uid')
+    label = Input(shape=[1, ], dtype=tf.float32, name='label')
+    hist_item_seq = Input(shape=[SEQ_LEN, ], dtype=tf.int64, name='hist_item_seq')
+    hist_item_len = Input(shape=[1, ], dtype=tf.int64, name='hist_item_len')
+    gender = Input(shape=[1, ], dtype=tf.int64, name='gender')
+    age = Input(shape=[1, ], dtype=tf.int64, name='age')
+    occupation = Input(shape=[1, ], dtype=tf.int64, name='occupation')
+    zip_input = Input(shape=[1, ], dtype=tf.int64, name='zip')
 
-    uid_emb_layer = keras.layers.Embedding(
-        user_size, EMB_DIM, embeddings_initializer=keras.initializers.TruncatedNormal(),
-        mask_zero=True, name='uid_emb_layer'
+    uid_emb_layer = Embedding(
+        user_size, EMB_DIM, mask_zero=True,
+        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        name='uid_emb_layer'
     )
-    iid_emb_layer = keras.layers.Embedding(
-        item_size, EMB_DIM, embeddings_initializer=keras.initializers.TruncatedNormal(),
-        mask_zero=True, name='iid_emb_layer'
+    iid_emb_layer = Embedding(
+        item_size, EMB_DIM, mask_zero=True,
+        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        name='iid_emb_layer'
     )
-    gender_emb_layer = keras.layers.Embedding(
-        sparse_features_max_idx['gender'], 2,  embeddings_initializer=keras.initializers.TruncatedNormal(),
-        mask_zero=True, name='gender_emb_layer'
+    gender_emb_layer = Embedding(
+        sparse_features_max_idx['gender'], 2, mask_zero=True,
+        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        name='gender_emb_layer'
+    )
+    age_emb_layer = Embedding(
+        sparse_features_max_idx['age'], 4, mask_zero=True,
+        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        name='age_emb_layer'
+    )
+    occupation_emb_layer = Embedding(
+        sparse_features_max_idx['occupation'], 4, mask_zero=True,
+        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        name='occupation_emb_layer'
 
     )
-    age_emb_layer = keras.layers.Embedding(
-        sparse_features_max_idx['age'], 4, embeddings_initializer=keras.initializers.TruncatedNormal(),
-        mask_zero=True, name='age_emb_layer'
-
-    )
-    occupation_emb_layer = keras.layers.Embedding(
-        sparse_features_max_idx['occupation'], 4, embeddings_initializer=keras.initializers.TruncatedNormal(),
-        mask_zero=True, name='occupation_emb_layer'
-
-    )
-    zip_emb_layer = keras.layers.Embedding(
-        sparse_features_max_idx['zip'], 4, embeddings_initializer=keras.initializers.TruncatedNormal(),
-        mask_zero=True, name='zip_emb_layer'
+    zip_emb_layer = Embedding(
+        sparse_features_max_idx['zip'], 4, mask_zero=True,
+        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        name='zip_emb_layer'
     )
 
     uid_emb = uid_emb_layer(uid)
@@ -89,32 +94,29 @@ if __name__ == '__main__':
     occupation_emb = occupation_emb_layer(occupation)
     zip_emb = zip_emb_layer(zip_input)
 
-    hist_item_seq_emb = iid_emb_layer(hist_item_seq)
-    mask = keras.layers.Lambda(
-        lambda x: tf.sequence_mask(x, SEQ_LEN, dtype=tf.float32), name='mask'
+    mask = Lambda(
+        lambda x: tf.transpose(tf.sequence_mask(x, SEQ_LEN, dtype=tf.float32), [0, 2, 1]),
+        name='mask'
     )(hist_item_len)
-    mask = keras.layers.Lambda(
-        lambda x: tf.transpose(x, [0, 2, 1]), name='mask_transpose'
+    hist_item_len_for_avg_pooling = Lambda(
+        lambda x: tf.reduce_sum(x, axis=1, keepdims=True), name='len_for_avg_pooling'
     )(mask)
-    hist_item_seq_emb = keras.layers.Lambda(
+    hist_item_seq_emb = iid_emb_layer(hist_item_seq)
+    hist_item_seq_emb = Lambda(
         lambda x: tf.reduce_sum(x[0] * x[1], axis=1, keepdims=True), name='masked_hist_item_seq_emb'
     )([hist_item_seq_emb, mask])
-    hist_item_len_for_avg_pooling = keras.layers.Lambda(
-        lambda x: tf.cast(tf.expand_dims(x, axis=1), tf.float32), name='len_for_avg_pooling'
-    )(hist_item_len)
-    hist_item_seq_emb = keras.layers.Lambda(
+    hist_item_seq_emb = Lambda(
         lambda x: x[0] / x[1], name='pooled_hist_item_seq_emb'
     )([hist_item_seq_emb, hist_item_len_for_avg_pooling])
-
-    all_embs = keras.layers.Concatenate(
+    all_embs = Concatenate(
         axis=-1
     )([uid_emb, hist_item_seq_emb, gender_emb, age_emb, occupation_emb, zip_emb])
-    all_embs = keras.layers.Flatten()(all_embs)
+    all_embs = Flatten()(all_embs)
 
-    hidden_1 = keras.layers.Dense(1024, 'relu', name='hidden_1')(all_embs)
-    hidden_2 = keras.layers.Dense(512, 'relu', name='hidden_2')(hidden_1)
-    hidden_3 = keras.layers.Dense(256, 'relu', name='hidden_3')(hidden_2)
-    final_out = keras.layers.Dense(EMB_DIM, name='user_out')(hidden_3)
+    hidden_1 = Dense(1024, 'relu', name='hidden_1')(all_embs)
+    hidden_2 = Dense(512, 'relu', name='hidden_2')(hidden_1)
+    hidden_3 = Dense(256, 'relu', name='hidden_3')(hidden_2)
+    final_out = Dense(EMB_DIM, name='user_out')(hidden_3)
 
     model = keras.Model(
         inputs=[uid, hist_item_seq, hist_item_len, gender, age, occupation, zip_input],
@@ -130,8 +132,8 @@ if __name__ == '__main__':
     index = faiss.IndexFlatIP(EMB_DIM)
 
     # definde loss and train_op
-    iid = keras.Input(shape=[1,], dtype=tf.int64, name='iid')
-    bias = tf.get_variable(name='bias', shape=[item_size,], initializer=tf.initializers.zeros(), trainable=False)
+    iid = Input(shape=[1, ], dtype=tf.int64, name='iid')
+    bias = tf.get_variable(name='bias', shape=[item_size, ], initializer=tf.initializers.zeros(), trainable=False)
     loss = tf.nn.sampled_softmax_loss(
         weights=all_item_emb,
         biases=bias,
@@ -183,7 +185,7 @@ if __name__ == '__main__':
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
             print(f'\ntrain_loss of epoch-{epoch + 1}: {(total_loss / batch_num):.8f}    ' +
-                '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
+                  '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
             if val_size == 0:
                 continue
             val_loss, val_user_emb, val_all_item_emb = sess.run(
@@ -205,8 +207,8 @@ if __name__ == '__main__':
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
             print(f'val_loss  of  epoch-{epoch + 1}: {val_loss:.8f}    ' +
-                '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
-            print(f'-' * 36 +  f'  hr@{MATCH_NUMS}: {hr:.6f}, ndcg@{MATCH_NUMS}: {ndcg:.6f}  ' +  '-' * 36)
+                  '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
+            print('-' * 36 + f'  hr@{MATCH_NUMS}: {hr:.6f}, ndcg@{MATCH_NUMS}: {ndcg:.6f}  ' + '-' * 36)
             print('=' * 120)
 
             if val_loss < best_val_loss:
@@ -232,5 +234,4 @@ if __name__ == '__main__':
         print('=' * 120)
         print(f'-------------test_loss of: {eval_loss:.8f}, \
             tiem elapsed: {time_elapsed:.2f}s -------------')
-        print(f'-' * 32 +  f'   hr: {hr:.6f}, ndcg: {ndcg:.6f}   ' +  '-' * 32)
-
+        print('-' * 32 + f'   hr: {hr:.6f}, ndcg: {ndcg:.6f}   ' + '-' * 32)

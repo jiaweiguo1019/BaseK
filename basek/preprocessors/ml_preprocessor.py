@@ -53,7 +53,7 @@ def split_dataset(dataset, validaton_split):
     return train_dataset, val_dataset
 
 
-def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
+def gen_dataset(data, validaton_split=True, neg_samples=0, neg_weight=1.0, neg_feedback=0.0):
 
     data.sort_values('timestamp', inplace=True)
     item_ids = data['movie_id'].unique()
@@ -63,13 +63,13 @@ def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
     user_profile.set_index('user_id', inplace=True)
     item_profile = data[['movie_id']].drop_duplicates('movie_id')
 
-    train_dataset = []
+    train_dataset, val_dataset, test_dataset = [], [], []
     neg_sample_dataset = []
-    test_dataset = []
     pos_label = 1.0
     neg_label = 0.0
     pos_weight = 1.0
     neg_weight = neg_weight
+    neg_feedback = neg_feedback
     for uid, hist in tqdm(data.groupby('user_id')):
         hist_item_seq = hist['movie_id'].tolist()
         hist_rating_seq = hist['rating'].tolist()
@@ -82,7 +82,7 @@ def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
         for i in range(1, len(hist_item_seq)):
             hist_item_sub_seq = hist_item_seq[:i]
             iid = hist_item_seq[i]
-            if i != len(hist_item_seq) - 1:
+            if i < len(hist_item_seq) - 2:
                 train_dataset.append(
                     (
                         uid, iid, pos_label,
@@ -93,7 +93,22 @@ def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
                     neg_sample_dataset.append(
                         (
                             uid, neg_list[i * neg_samples + neg_i], neg_label,
-                            hist_item_sub_seq[:], len(hist_item_sub_seq), neg_weight
+                            hist_item_sub_seq[:], len(hist_item_sub_seq), neg_weight, neg_feedback
+                        )
+                    )
+            elif i == len(hist_item_seq) - 2:
+                if validaton_split is True:
+                    val_dataset.append(
+                        (
+                            uid, iid, pos_label,
+                            hist_item_sub_seq[:], len(hist_item_sub_seq), pos_weight, hist_rating_seq[i]
+                        )
+                    )
+                else:
+                    train_dataset.append(
+                        (
+                            uid, iid, pos_label,
+                            hist_item_sub_seq[:], len(hist_item_sub_seq), pos_weight, hist_rating_seq[i]
                         )
                     )
             else:
@@ -104,22 +119,16 @@ def gen_dataset(data, validaton_split=None, neg_samples=0, neg_weight=1.0):
                     )
                 )
 
-    np.random.shuffle(train_dataset)
-    np.random.shuffle(neg_sample_dataset)
-    # np.random.shuffle(test_dataset)
-
-    if validaton_split is not None:
-        train_dataset, val_dataset = split_dataset(train_dataset, validaton_split)
-    else:
-        train_dataset, val_dataset = train_dataset, []
-
     train_dataset = train_dataset + neg_sample_dataset
+    # np.random.shuffle(train_dataset)
+
     train_size = len(train_dataset)
     val_size = len(val_dataset)
     test_size = len(test_dataset)
 
     print('-' * 120)
-    print('-' * 16 + f'  {train_size} training samples, {val_size} validation samples, {test_size} testing samples.    ' + '-' * 16)
+    print('-' * 16 + f'  {train_size} training samples, {val_size} validation samples, {test_size} testing samples.  '
+          + '-' * 16)
 
     return (train_dataset, val_dataset, test_dataset), (user_profile, item_profile)
 
@@ -130,13 +139,21 @@ def gen_model_input(dataset, user_profile, item_profile, seq_max_len, ):
     if total_size == 0:
         return {'size': 0}
 
-    uid = np.array([[line[0]] for line in dataset])
-    iid = np.array([[line[1]] for line in dataset])
-    label = np.array([[line[2]] for line in dataset])
-
-    hist_item_seq = [line[3] for line in dataset]
-    hist_item_len = np.array([[line[4]] for line in dataset])
-    sample_weight = np.array([[line[5]] for line in dataset])
+    uid, iid, label, hist_item_seq, hist_item_len, sample_weight, feedback = [], [], [], [], [], [], []
+    for line in dataset:
+        uid.append(line[0])
+        iid.append(line[1])
+        label.append(line[2])
+        hist_item_seq.append(line[3])
+        hist_item_len.append(line[4])
+        sample_weight.append(line[5])
+        feedback.append(line[6])
+    uid = np.array(uid)
+    iid = np.array(iid)
+    label = np.array(label)
+    hist_item_len = np.array(hist_item_len)
+    sample_weight = np.array(sample_weight)
+    feedback = np.array(feedback)
 
     padded_hist_item_seq = keras.preprocessing.sequence.pad_sequences(
         hist_item_seq, maxlen=seq_max_len, padding='post', truncating='pre', value=0, dtype='int64'
@@ -148,11 +165,12 @@ def gen_model_input(dataset, user_profile, item_profile, seq_max_len, ):
     zip = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
 
     model_input = {
-        'uid': uid, 'iid': iid, 'label': label,
-        'hist_item_seq': padded_hist_item_seq, 'hist_item_len': hist_item_len,
-        'gender': gender, 'age': age,
-        'occupation': occupation, 'zip': zip,
-        'sample_weight': sample_weight, 'size': total_size
+        'uid': uid.reshape(-1, 1), 'iid': iid.reshape(-1, 1), 'label': label.reshape(-1, 1),
+        'hist_item_seq': padded_hist_item_seq, 'hist_item_len': hist_item_len.reshape(-1, 1),
+        'gender': gender.reshape(-1, 1), 'age': age.reshape(-1, 1),
+        'occupation': occupation.reshape(-1, 1), 'zip': zip.reshape(-1, 1),
+        'sample_weight': sample_weight.reshape(-1, 1), 'feedback': feedback.reshape(-1, 1),
+        'size': total_size
     }
 
     return model_input

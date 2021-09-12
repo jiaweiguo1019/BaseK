@@ -19,7 +19,8 @@ NEG_SAMPLES = 0
 EMB_DIM = 32
 EPOCHS = 1000
 BATCH_SIZE = 256
-MATCH_NUMS = 50
+MATCH_NUMS = [1, 5, 10, 20, 50, 100, 200]
+MAX_MATCH_NUM = 200
 
 
 if __name__ == '__main__':
@@ -129,10 +130,10 @@ if __name__ == '__main__':
     iid = Input(shape=[1, ], dtype=tf.int64, name='iid')
     iid_emb = iid_emb_layer(iid)
 
-    item_hidden_1 = Dense(1024, 'relu', name='item_hidden_1')(all_embs)
+    item_hidden_1 = Dense(1024, 'relu', name='item_hidden_1')(iid_emb)
     item_hidden_2 = Dense(512, 'relu', name='item_hidden_2')(item_hidden_1)
     item_hidden_3 = Dense(256, 'relu', name='item_hidden_3')(item_hidden_2)
-    item_out = Dense(EMB_DIM, name='user_out')(item_hidden_3)
+    item_out = Dense(EMB_DIM, name='item_out')(item_hidden_3)
     item_out = Flatten()(item_out)
     item_model = keras.Model(
         inputs=[iid],
@@ -140,7 +141,7 @@ if __name__ == '__main__':
         name='item_model'
     )
     print('=' * 120)
-    item_model.summary()
+    item_model.summary(line_length=120)
 
     # for evaluate
     all_item_index = Index(item_size)
@@ -148,7 +149,6 @@ if __name__ == '__main__':
     index = faiss.IndexFlatIP(EMB_DIM)
 
     # definde loss and train_op
-    iid = Input(shape=[1, ], dtype=tf.int64, name='iid')
     bias = tf.get_variable(name='bias', shape=[item_size, ], initializer=tf.initializers.zeros(), trainable=False)
     loss = tf.nn.sampled_softmax_loss(
         weights=all_item_emb,
@@ -179,7 +179,8 @@ if __name__ == '__main__':
         all_idx = np.arange(train_size)
         for epoch in range(EPOCHS):
             total_loss = 0.0
-            model.save_weights(ckpt_path + f'/{epoch}')
+            user_model.save_weights(ckpt_path + f'/user_{epoch}')
+            item_model.save_weights(ckpt_path + f'/item_{epoch}')
             np.random.shuffle(all_idx)
             for i in range(batch_num):
                 batch_idx = all_idx[i * BATCH_SIZE: (i + 1) * BATCH_SIZE]
@@ -204,7 +205,7 @@ if __name__ == '__main__':
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
             print(f'\ntrain_loss of epoch-{epoch + 1}: {(total_loss / batch_num):.8f}    ' +
-                  '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
+                  '-' * 36 + f'    time elapsed: {time_elapsed:.2f}s')
             if val_size == 0:
                 continue
             val_loss, val_user_emb, val_all_item_emb = sess.run(
@@ -216,23 +217,23 @@ if __name__ == '__main__':
                     occupation: val_input['occupation'], zip_input: val_input['zip']
                 }
             )
+
+            print(f'val_loss  of  epoch-{epoch + 1}: {val_loss:.8f}    ' + '-' * 72)
             # faiss.normalize_L2(val_user_emb)
             # faiss.normalize_L2(val_all_item_emb)
             index.reset()
             index.add(val_all_item_emb)
-            _, I = index.search(np.ascontiguousarray(val_user_emb), MATCH_NUMS)
-            hr, ndcg = compute_metrics(I, val_input['uid'], val_input['iid'])
+            _, I = index.search(np.ascontiguousarray(val_user_emb), MAX_MATCH_NUM)
+            compute_metrics(I, MATCH_NUMS, val_input['uid'], val_input['iid'])
             curr_time = time()
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
-            print(f'val_loss  of  epoch-{epoch + 1}: {val_loss:.8f}    ' +
-                  '-' * 36 + f'    tiem elapsed: {time_elapsed:.2f}s')
-            print('-' * 36 + f'  hr@{MATCH_NUMS}: {hr:.6f}, ndcg@{MATCH_NUMS}: {ndcg:.6f}  ' + '-' * 36)
-            print('=' * 120)
+            print('-' * 74 + f'    time elapsed: {time_elapsed:.2f}s\n' + '=' * 120)
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                model.save_weights(ckpt_path + '/best')
+                user_model.save_weights(ckpt_path + '/user_best')
+                item_model.save_weights(ckpt_path + '/item_best')
 
         eval_loss, eval_user_emb, eval_all_item_emb = sess.run(
             [loss, user_out, all_item_emb],
@@ -243,14 +244,12 @@ if __name__ == '__main__':
                 occupation: test_input['occupation'], zip_input: test_input['zip']
             }
         )
+        print('=' * 120)
+        print(f'test_loss  of: {eval_loss:.8f}        ' + '-' * 72)
         index.reset()
         index.add(eval_all_item_emb)
-        _, I = index.search(np.ascontiguousarray(eval_user_emb), MATCH_NUMS)
-        hr, ndcg = compute_metrics(I, test_input['uid'], test_input['iid'])
+        _, I = index.search(np.ascontiguousarray(eval_user_emb), MAX_MATCH_NUM)
+        compute_metrics(I, MATCH_NUMS, test_input['uid'], test_input['iid'])
         curr_time = time()
         time_elapsed = curr_time - prev_time
-        prev_time = curr_time
-        print('=' * 120)
-        print(f'-------------test_loss of: {eval_loss:.8f}, \
-            tiem elapsed: {time_elapsed:.2f}s -------------')
-        print('-' * 32 + f'   hr: {hr:.6f}, ndcg: {ndcg:.6f}   ' + '-' * 32)
+        print('-' * 74 + f'    time elapsed: {time_elapsed:.2f}s\n' + '=' * 120)

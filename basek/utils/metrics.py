@@ -1,6 +1,6 @@
 from tqdm import tqdm
 
-import numpy as np
+from basek.utils.imports import numpy as np
 
 
 def compute_metrics(I, match_nums, uid, iid):
@@ -27,6 +27,7 @@ def compute_metrics(I, match_nums, uid, iid):
                 hit_i.append(0)
                 ndcg_i.append(0.0)
 
+    return hits, ndcgs
     for idx, (hit_i, ndcg_i) in enumerate(zip(hits, ndcgs)):
         mean_hr = np.mean(hit_i)
         mean_ndcg = np.mean(ndcg_i)

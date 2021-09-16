@@ -1,4 +1,4 @@
-import numpy as np
+from basek.utils.imports import numpy as np
 
 from basek.utils.tf_compat import keras, tf
 
@@ -19,7 +19,7 @@ class BiasAdd(Layer):
 
     def build(self, input_shape):
         self.bias = self.add_weight(
-            shape=[self.dim, ], initializer=keras.initializers.Zeros(), name="bias"
+            shape=[self.dim], initializer=keras.initializers.Zeros(), name="bias"
         )
         super().build(input_shape)
 
@@ -40,12 +40,12 @@ class Concatenate(Layer):
 
 class Index(Layer):
 
-    def __init__(self, max_idx, **kwargs):
-        self.max_idx = max_idx
+    def __init__(self, index, **kwargs):
+        self.index = index
         super().__init__(**kwargs)
 
     def call(self):
-        index = np.arange(self.max_idx).reshape(-1, 1)
+        index = np.array(self.index).reshape(-1, 1)
         return tf.constant(index, dtype=tf.int64)
 
     def __call__(self):

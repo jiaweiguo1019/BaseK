@@ -1,8 +1,8 @@
-import numpy as np
+from basek.utils.imports import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
+# from sklearn.model_selection import train_test_split
 
 from basek.utils.tf_compat import keras
 
@@ -42,16 +42,6 @@ def read_raw_data(data_path, sparse_features):
     data = read_csv(data_path)
     max_idx = index_sparse_features(data, sparse_features)
     return data, max_idx
-
-
-def split_dataset(dataset, validaton_split):
-    if not isinstance(validaton_split, float) or validaton_split <= 0.0:
-        raise ValueError('validaton_split should be a float in the (0, 1) range!')
-    total_size = len(dataset)
-    train_size = int(np.ceil(total_size * (1.0 - validaton_split)))
-    train_dataset = dataset[:train_size]
-    val_dataset = dataset[train_size:]
-    return train_dataset, val_dataset
 
 
 def gen_dataset(data, validaton_split=True, neg_samples=0, neg_weight=1.0, neg_feedback=0.0):

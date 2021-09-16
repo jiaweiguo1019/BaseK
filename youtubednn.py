@@ -2,7 +2,7 @@ import os
 from time import localtime, strftime, time
 
 import faiss
-import numpy as np
+from basek.utils.imports import numpy as np
 from tqdm import tqdm
 
 from basek.params import args
@@ -48,14 +48,14 @@ if __name__ == '__main__':
     print('-' * 4 + f'  model weights are saved in {os.path.realpath(ckpt_path)}  ' + '-' * 4)
 
     # bulid model
-    uid = Input(shape=[1, ], dtype=tf.int64, name='uid')
-    label = Input(shape=[1, ], dtype=tf.float32, name='label')
-    hist_item_seq = Input(shape=[SEQ_LEN, ], dtype=tf.int64, name='hist_item_seq')
-    hist_item_len = Input(shape=[1, ], dtype=tf.int64, name='hist_item_len')
-    gender = Input(shape=[1, ], dtype=tf.int64, name='gender')
-    age = Input(shape=[1, ], dtype=tf.int64, name='age')
-    occupation = Input(shape=[1, ], dtype=tf.int64, name='occupation')
-    zip_input = Input(shape=[1, ], dtype=tf.int64, name='zip')
+    uid = Input(shape=[1], dtype=tf.int64, name='uid')
+    label = Input(shape=[1], dtype=tf.float32, name='label')
+    hist_item_seq = Input(shape=[SEQ_LEN], dtype=tf.int64, name='hist_item_seq')
+    hist_item_len = Input(shape=[1], dtype=tf.int64, name='hist_item_len')
+    gender = Input(shape=[1], dtype=tf.int64, name='gender')
+    age = Input(shape=[1], dtype=tf.int64, name='age')
+    occupation = Input(shape=[1], dtype=tf.int64, name='occupation')
+    zip_input = Input(shape=[1], dtype=tf.int64, name='zip')
 
     uid_emb_layer = Embedding(
         user_size, EMB_DIM, mask_zero=True,
@@ -133,8 +133,8 @@ if __name__ == '__main__':
     index = faiss.IndexFlatIP(EMB_DIM)
 
     # definde loss and train_op
-    iid = Input(shape=[1, ], dtype=tf.int64, name='iid')
-    bias = tf.get_variable(name='bias', shape=[item_size, ], initializer=tf.initializers.zeros(), trainable=False)
+    iid = Input(shape=[1], dtype=tf.int64, name='iid')
+    bias = tf.get_variable(name='bias', shape=[item_size], initializer=tf.initializers.zeros(), trainable=False)
     loss = tf.nn.sampled_softmax_loss(
         weights=all_item_emb,
         biases=bias,

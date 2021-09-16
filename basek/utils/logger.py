@@ -1,5 +1,5 @@
 
-import numpy as np
+from basek.utils.imports import numpy as np
 # from setproctitle import setproctitle
 from tensorboardX import SummaryWriter
 

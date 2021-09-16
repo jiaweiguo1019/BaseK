@@ -12,12 +12,13 @@ from basek.utils.tf_compat import tf, keras
 
 from basek.layers.base import BiasAdd, Concatenate, Dense, Embedding, Flatten, Index, Input, Lambda
 
+from params import args
 
-SEQ_LEN = 50
+SEQ_LEN = 20
 VALIDATION_SPLIT = True
 NEG_SAMPLES = 0
 EMB_DIM = 32
-EPOCHS = 1000
+EPOCHS = args.epochs
 BATCH_SIZE = 256
 MATCH_NUMS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200]
 MAX_MATCH_NUM = 200
@@ -31,8 +32,17 @@ if __name__ == '__main__':
     user_size = sparse_features_max_idx['user_id']
     item_size = sparse_features_max_idx['movie_id']
 
+    task = str.lower(args.task)
+    if task == 'train':
+        VALIDATION_SPLIT = True
+    elif task == 'test':
+        VALIDATION_SPLIT = False
+    else:
+        raise ValueError(f'task should be either train or test, unkonwn task: {args.task}')
+
     datasets, profiles = gen_dataset(data, VALIDATION_SPLIT, NEG_SAMPLES)
     train_dataset, val_dataset, test_dataset = datasets
+
     user_profile, item_profile = profiles
 
     train_input = gen_model_input(train_dataset, user_profile, item_profile, SEQ_LEN)
@@ -49,6 +59,7 @@ if __name__ == '__main__':
 
     # bulid model
     uid = Input(shape=[1], dtype=tf.int64, name='uid')
+    iid = Input(shape=[1], dtype=tf.int64, name='iid')
     label = Input(shape=[1], dtype=tf.float32, name='label')
     hist_item_seq = Input(shape=[SEQ_LEN], dtype=tf.int64, name='hist_item_seq')
     hist_item_len = Input(shape=[1], dtype=tf.int64, name='hist_item_len')
@@ -90,6 +101,7 @@ if __name__ == '__main__':
     )
 
     uid_emb = uid_emb_layer(uid)
+    iid_emb = iid_emb_layer(iid)
     gender_emb = gender_emb_layer(gender)
     age_emb = age_emb_layer(age)
     occupation_emb = occupation_emb_layer(occupation)
@@ -109,57 +121,62 @@ if __name__ == '__main__':
     hist_item_seq_emb = Lambda(
         lambda x: x[0] / x[1], name='pooled_hist_item_seq_emb'
     )([hist_item_seq_emb, hist_item_len_for_avg_pooling])
-    all_embs = Concatenate(
-        axis=-1
+    concatenated_all_embs = Concatenate(
+        axis=-1,
+        name='concatenated_all_embs'
     )([uid_emb, hist_item_seq_emb, gender_emb, age_emb, occupation_emb, zip_emb])
-    all_embs = Flatten()(all_embs)
+    all_embs = Flatten(name='flattened_all_embs')(concatenated_all_embs)
 
     user_hidden_1 = Dense(1024, 'relu', name='user_hidden_1')(all_embs)
     user_hidden_2 = Dense(512, 'relu', name='user_hidden_2')(user_hidden_1)
     user_hidden_3 = Dense(256, 'relu', name='user_hidden_3')(user_hidden_2)
     user_out = Dense(EMB_DIM, name='user_out')(user_hidden_3)
 
-    user_model = keras.Model(
-        inputs=[uid, hist_item_seq, hist_item_len, gender, age, occupation, zip_input],
-        outputs=[user_out],
-        name='user_model'
+    item_out = Flatten(name='item_out')(iid_emb)
+
+    model = keras.Model(
+        inputs=[uid, iid, hist_item_seq, hist_item_len, gender, age, occupation, zip_input],
+        outputs=[user_out, item_out]
     )
     print('=' * 120)
-    user_model.summary()
-
-    iid = Input(shape=[1], dtype=tf.int64, name='iid')
-    iid_emb = iid_emb_layer(iid)
-
-    item_hidden_1 = Dense(1024, 'relu', name='item_hidden_1')(iid_emb)
-    item_hidden_2 = Dense(512, 'relu', name='item_hidden_2')(item_hidden_1)
-    item_hidden_3 = Dense(256, 'relu', name='item_hidden_3')(item_hidden_2)
-    item_out = Dense(EMB_DIM, name='item_out')(item_hidden_3)
-    item_out = Flatten()(item_out)
-    item_model = keras.Model(
-        inputs=[iid],
-        outputs=[item_out],
-        name='item_model'
-    )
-    print('=' * 120)
-    item_model.summary(line_length=120)
+    model.summary()
 
     # for evaluate
     all_item_index = Index(item_size)
-    all_item_emb = item_model(all_item_index())
+    all_item_emb = iid_emb_layer(all_item_index())
+    all_item_out = Flatten()(all_item_emb)
     index = faiss.IndexFlatIP(EMB_DIM)
 
     # definde loss and train_op
-    bias = tf.get_variable(name='bias', shape=[item_size], initializer=tf.initializers.zeros(), trainable=False)
-    loss = tf.nn.sampled_softmax_loss(
-        weights=all_item_emb,
-        biases=bias,
-        labels=iid,
-        inputs=user_out,
+    sampled_values = tf.random.uniform_candidate_sampler(
+        true_classes=iid,
+        num_true=1,
         num_sampled=160,
-        num_classes=item_size
+        unique=True,
+        range_max=item_size
+    )
+    sampled_iid, true_expected_count, sampled_expected_count = (tf.stop_gradient(s) for s in sampled_values)
+    sampled_iid_emb = iid_emb_layer(sampled_iid)
+
+    true_prod_logits = tf.reduce_sum(tf.multiply(user_out, item_out), axis=-1, keepdims=True)
+    sampled_prod_logits = tf.matmul(user_out, sampled_iid_emb, transpose_b=True)
+    true_prod_logits -= tf.log(true_expected_count)
+    sampled_prod_logits -= tf.log(sampled_expected_count)
+    all_logits = tf.concat([true_prod_logits, sampled_prod_logits], axis=-1)
+
+    true_labels = tf.ones_like(true_prod_logits)
+    samples_labels = tf.zeros_like(sampled_prod_logits)
+    all_labels = tf.concat([true_labels, samples_labels], axis=-1)
+    all_labels = tf.stop_gradient(all_labels)
+
+    loss = tf.nn.softmax_cross_entropy_with_logits_v2(
+        labels=all_labels, logits=all_logits
     )
     loss = tf.reduce_mean(loss)
-    optimizer = keras.optimizers.Adam()
+
+    # optimizer = keras.optimizers.Adam()
+    import tensorflow.contrib as tf_contib
+    optimizer = tf_contib.opt.AdamWOptimizer(0.0001)
     model_vars = tf.trainable_variables()
     grads = tf.gradients(loss, model_vars)
     train_op = optimizer.apply_gradients(zip(grads, model_vars))
@@ -179,8 +196,7 @@ if __name__ == '__main__':
         all_idx = np.arange(train_size)
         for epoch in range(EPOCHS):
             total_loss = 0.0
-            user_model.save_weights(ckpt_path + f'/user_{epoch}')
-            item_model.save_weights(ckpt_path + f'/item_{epoch}')
+            model.save_weights(ckpt_path + f'/{epoch}')
             np.random.shuffle(all_idx)
             for i in range(batch_num):
                 batch_idx = all_idx[i * BATCH_SIZE: (i + 1) * BATCH_SIZE]
@@ -200,7 +216,7 @@ if __name__ == '__main__':
                     }
                 )
                 total_loss += batch_loss
-                print('\r' + '-' * 42 + f'  batch_loss: {batch_loss:.8f}  '  + '-' * 42, end='')
+                print('\r' + '-' * 42 + f'  batch_loss: {batch_loss:.8f}  ' + '-' * 42, end='')
             curr_time = time()
             time_elapsed = curr_time - prev_time
             prev_time = curr_time
@@ -208,8 +224,8 @@ if __name__ == '__main__':
                   '-' * 36 + f'    time elapsed: {time_elapsed:.2f}s')
             if val_size == 0:
                 continue
-            val_loss, val_user_emb, val_all_item_emb = sess.run(
-                [loss, user_out, all_item_emb],
+            val_loss, val_user_out, val_all_item_out = sess.run(
+                [loss, user_out, all_item_out],
                 feed_dict={
                     uid: val_input['uid'], iid: val_input['iid'],
                     hist_item_seq: val_input['hist_item_seq'], hist_item_len: val_input['hist_item_len'],
@@ -217,13 +233,12 @@ if __name__ == '__main__':
                     occupation: val_input['occupation'], zip_input: val_input['zip']
                 }
             )
-
             print(f'val_loss  of  epoch-{epoch + 1}: {val_loss:.8f}    ' + '-' * 72)
-            # faiss.normalize_L2(val_user_emb)
-            # faiss.normalize_L2(val_all_item_emb)
+            # faiss.normalize_L2(val_user_out)
+            # faiss.normalize_L2(val_all_item_out)
             index.reset()
-            index.add(val_all_item_emb)
-            _, I = index.search(np.ascontiguousarray(val_user_emb), MAX_MATCH_NUM)
+            index.add(val_all_item_out)
+            _, I = index.search(np.ascontiguousarray(val_user_out), MAX_MATCH_NUM)
             compute_metrics(I, MATCH_NUMS, val_input['uid'], val_input['iid'])
             curr_time = time()
             time_elapsed = curr_time - prev_time
@@ -232,11 +247,10 @@ if __name__ == '__main__':
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                user_model.save_weights(ckpt_path + '/user_best')
-                item_model.save_weights(ckpt_path + '/item_best')
+                model.save_weights(ckpt_path + '/best')
 
-        eval_loss, eval_user_emb, eval_all_item_emb = sess.run(
-            [loss, user_out, all_item_emb],
+        eval_loss, eval_user_out, eval_all_item_out = sess.run(
+            [loss, user_out, all_item_out],
             feed_dict={
                 uid: test_input['uid'], iid: test_input['iid'],
                 hist_item_seq: test_input['hist_item_seq'], hist_item_len: test_input['hist_item_len'],
@@ -247,8 +261,8 @@ if __name__ == '__main__':
         print('=' * 120)
         print(f'test_loss  of: {eval_loss:.8f}        ' + '-' * 72)
         index.reset()
-        index.add(eval_all_item_emb)
-        _, I = index.search(np.ascontiguousarray(eval_user_emb), MAX_MATCH_NUM)
+        index.add(eval_all_item_out)
+        _, I = index.search(np.ascontiguousarray(eval_user_out), MAX_MATCH_NUM)
         compute_metrics(I, MATCH_NUMS, test_input['uid'], test_input['iid'])
         curr_time = time()
         time_elapsed = curr_time - prev_time

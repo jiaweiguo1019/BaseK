@@ -12,7 +12,6 @@ from basek.utils.tf_compat import tf, keras
 
 from basek.layers.base import BiasAdd, Concatenate, Dense, Embedding, Flatten, Index, Input, Lambda
 
-from params import args
 
 SEQ_LEN = 20
 VALIDATION_SPLIT = True

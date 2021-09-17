@@ -1,64 +1,57 @@
 import os
-import pandas as pd
+import pickle
+import time
 from collections import defaultdict
-from basek.utils.imports import numpy as np
+from functools import partial
+from queue import Queue
+from threading import Thread
+
+import pandas as pd
 from tqdm import tqdm
 
+from basek.utils.tf_compat import keras
+from basek.utils.imports import numpy as np
 
-def read_reviews(meta_path, review_path, true_sample_weight=1.0, neg_sampes=0, neg_sample_weight=1.0):
 
-    abspath = os.path.abspath(meta_path)
+def read_reviews(file_path, true_sample_weight=1.0, neg_sampes=0, neg_sample_weight=1.0):
+
+    abspath = os.path.abspath(file_path)
     dir_path = os.path.split(abspath)[0]
-    review_info_train = os.path.join(dir_path, 'reviw_info_train')
-    review_info_test = os.path.join(dir_path, 'reviw_info_test')
+    train_file = os.path.join(dir_path, 'train')
+    test_file = os.path.join(dir_path, 'test')
 
-    asin_to_cate = {}
-    asin_set, cate_set = set(), set()
-    with open(meta_path, 'r') as f_in:
-        print('-' * 32 + '     processing items     ' + '-' * 32)
-        for line in tqdm(f_in):
-            line = eval(line)
-            asin, cate = line['asin'], line['categories'][0][-1]
-            asin_set.add(asin)
-            cate_set.add(cate)
-            asin_to_cate[asin] = cate
-
-    asin_count = defaultdict(int)
-    for asin in asin_set:
-        asin_count[asin] = 0
-    cate_count = defaultdict(int)
-    for cate in cate_set:
-        cate_count[cate] = 0
-
-    user_count = defaultdict(int)
     all_lines = []
-    with open(review_path, 'r') as f_in:
-        print('-' * 32 + '    processing samples    ' + '-' * 32)
-        for line in tqdm(f_in):
-            line = eval(line)
-            user = line['reviewerID']
-            asin = line['asin']
-            rating = str(line["overall"])
-            timestamp = line["unixReviewTime"]
+    user_count = defaultdict(int)
+    item_count = defaultdict(int)
+    cate_count = defaultdict(int)
+    item_to_cate = {'null': 'null', 'default_item': 'default_cate'}
+    with open(file_path, 'r') as f:
+        # for line in tqdm(f):
+        for _ in tqdm(range(100000)):
+            line = f.readline()
+            line = line.strip().split(',')
+            user, item, cate, behavior, timestamp = line
             user_count[user] += 1
-            asin_count[asin] += 1
-            cate = asin_to_cate.get(asin)
-            if cate is not None:
-                cate_count[cate] += 1
-            else:
-                cate = 'default_cate'
-            all_lines.append(((user, asin, cate, rating), timestamp))
+            item_count[item] += 1
+            cate_count[cate] += 1
+            item_to_cate[item] = cate
+            all_lines.append(((user, item, cate, behavior), float(timestamp)))
+    start_ts = time.mktime(time.strptime('2017-11-25 0:0:0', "%Y-%m-%d %H:%M:%S"))
+    end_ts = time.mktime(time.strptime('2017-12-4 0:0:0', "%Y-%m-%d %H:%M:%S"))
+    all_lines = list(filter(lambda x: start_ts <= x[1] < end_ts, all_lines))
     all_lines.sort(key=lambda x: x[-1])
-    user_size = len(user_count)
-    item_size = len(asin_count)
-    cate_size = len(cate_count)
-    print('-' * 16 + f'    user_size: {user_size}, item_size: {item_size}, ' +
-          f'cate_size: {cate_size}    ' + '-' * 16)
+    user_size = len(user_count) + 2
+    item_size = len(item_count) + 2
+    cate_size = len(cate_count) + 2
+    sparse_features_max_idx = {'uid': user_size, 'iid': item_size, 'cid': cate_size}
+    serialized_sparse_features_max_idx = pickle.dumps(sparse_features_max_idx)
+    with open(os.path.join(dir_path, 'sparse_features_max_idx'), 'wb') as f:
+        f.write(serialized_sparse_features_max_idx)
 
     item_to_iid = {'null': 0, 'default_item': 1}
     iid_to_item = {0: 'null', 1: 'default_item'}
-    asin_count = dict(sorted(asin_count.items(), key=lambda x: x[-1]))
-    for idx, asin in enumerate(asin_count):
+    item_count = dict(sorted(item_count.items(), key=lambda x: x[-1], reverse=True))
+    for idx, asin in enumerate(item_count):
         item_to_iid[asin] = idx + 2
         iid_to_item[idx + 2] = asin
     item_to_iid = pd.Series(item_to_iid)
@@ -68,7 +61,6 @@ def read_reviews(meta_path, review_path, true_sample_weight=1.0, neg_sampes=0, n
 
     cate_to_cid = {'null': 0, 'default_cate': 1}
     cid_to_cate = {0: 'null', 1: 'default_cate'}
-    cate_count = dict(sorted(cate_count.items(), key=lambda x: x[-1]))
     for idx, cate in enumerate(cate_count):
         cate_to_cid[cate] = idx + 2
         cid_to_cate[idx + 2] = cate
@@ -77,9 +69,23 @@ def read_reviews(meta_path, review_path, true_sample_weight=1.0, neg_sampes=0, n
     cate_to_cid.to_csv(os.path.join(dir_path, 'cate_to_cid.csv'), sep='^', header=False)
     cid_to_cate.to_csv(os.path.join(dir_path, 'cid_to_cate.csv'), sep='^', header=False)
 
+    iid_to_cid = {}
+    for item, iid in item_to_iid.items():
+        cate = item_to_cate[item]
+        cid = cate_to_cid[cate]
+        iid_to_cid[iid] = cid
+    iid_to_cid = pd.Series(iid_to_cid)
+    iid_to_cid.to_csv(os.path.join(dir_path, 'iid_to_cid.csv'), sep='^', header=False)
+    all_iid_index = list(range(item_size))
+    all_cid_index = list(iid_to_cid.loc[all_iid_index].values)
+    all_indices = all_iid_index, all_cid_index
+    serialized_all_indices = pickle.dumps(all_indices)
+    with open(os.path.join(dir_path, 'all_indices'), 'wb') as f:
+        f.write(serialized_all_indices)
+
     user_to_uid = {'null': 0, 'default_user': 1}
     uid_to_user = {0: 'null', 1: 'default_user'}
-    user_count = dict(sorted(user_count.items(), key=lambda x: x[-1]))
+    user_count = dict(sorted(user_count.items(), key=lambda x: x[-1], reverse=True))
     for idx, user in enumerate(user_count):
         user_to_uid[user] = idx + 2
         uid_to_user[idx + 2] = user
@@ -97,8 +103,7 @@ def read_reviews(meta_path, review_path, true_sample_weight=1.0, neg_sampes=0, n
     user_hist_cid_seq = defaultdict(str)
     write_user_count = defaultdict(int)
     true_train_samples, neg_train_samples, test_samples = 0, 0, 0
-
-    with open(review_info_train, 'w') as f_train, open(review_info_test, 'w') as f_test:
+    with open(train_file, 'w') as f_train, open(test_file, 'w') as f_test:
         print('-' * 32 + '    writing samples    ' + '-' * 32)
         # print(user_count)
         for line in tqdm(all_lines):
@@ -127,7 +132,7 @@ def read_reviews(meta_path, review_path, true_sample_weight=1.0, neg_sampes=0, n
                         uid, iid, cid, pos_label, hist_iid_seq, hist_cid_seq,
                         hist_seq_len, true_sample_weight, rating
                     )
-                )  + '\n'
+                ) + '\n'
             )
             if neg_sampes > 0 and not write_test:
                 all_neg_samples_iid = set()
@@ -138,10 +143,8 @@ def read_reviews(meta_path, review_path, true_sample_weight=1.0, neg_sampes=0, n
                         if iid_to_item[neg_sampe_iid] != asin and neg_sampe_iid not in all_neg_samples_iid:
                             all_neg_samples_iid.add(neg_sampe_iid)
                             break
-                    neg_asin = iid_to_item[neg_sampe_iid]
-                    cate = asin_to_cate.get(neg_asin)
-                    if cate is None:
-                        cate = 'default_cate'
+                    neg_item = iid_to_item[neg_sampe_iid]
+                    cate = item_to_cate.get(neg_item, 'default_cate')
                     neg_sample_cid = cate_to_cid[cate]
                     neg_sampe_iid, neg_sample_cid = str(neg_sampe_iid), str(neg_sample_cid)
 
@@ -155,9 +158,129 @@ def read_reviews(meta_path, review_path, true_sample_weight=1.0, neg_sampes=0, n
                         ) + '\n'
                     )
     total_train_samples = true_train_samples + neg_train_samples
-    print('-' * 4 + f'  {total_train_samples} training samples, ' +
-          f'{true_train_samples} of them are true_train_samples, ' +
-          f'{neg_train_samples} of them are neg_train_samples  ' + '-' * 4)
+    print('=' * 120)
+    print(
+        '-' * 4 + f'  {total_train_samples} training samples, ' +
+        f'{true_train_samples} of them are true_train_samples, ' +
+        f'{neg_train_samples} of them are neg_train_samples  ' + '-' * 4
+    )
     print('-' * 32 + f'    {test_samples} testing samples    ' + '-' * 32)
 
-    return (review_info_train, review_info_test), (user_size, item_size, cate_size)
+    return (train_file, test_file), sparse_features_max_idx, all_indices
+
+
+class DataLoader():
+
+    def __init__(
+        self, file_path, batch_size,
+        max_seq_len=100, prefetch_batch=10,
+        shuffle=False, sort_by_length=False
+    ):
+        self.source = open(file_path, 'r')
+        self.batch_size = batch_size
+        self.max_seq_len = max_seq_len
+        self.prefetch_batch = prefetch_batch
+        self.shuffle = shuffle
+        self.sort_by_length = sort_by_length
+        self.buffer_size = self.batch_size * self.prefetch_batch
+        self.__init()
+
+    def __init(self):
+        self.processor = partial(
+            self.process_data,
+            max_seq_len=self.max_seq_len, shuffle=self.shuffle, sort_by_length=self.sort_by_length
+        )
+        self.data_buffer = Queue(maxsize=self.prefetch_batch)
+        self.reset()
+
+    def reset(self):
+        self.source.seek(0)
+        self.data_loader = Thread(target=self.load_data)
+        self.data_loader.daemon = True
+        self.data_loader.start()
+
+    def load_data(self):
+        end_of_file = False
+        while True:
+            if self.data_buffer.qsize() >= self.prefetch_batch:
+                continue
+            batch_raw_data = []
+            for _ in range(self.batch_size):
+                line = self.source.readline()
+                if not line:
+                    end_of_file = True
+                    break
+                batch_raw_data.append(line)
+            if batch_raw_data:
+                batch_data = self.processor(batch_raw_data)
+                self.data_buffer.put(batch_data)
+            if end_of_file:
+                break
+        self.data_buffer.put(None)
+
+    def __next__(self):
+        while True:
+            data = self.data_buffer.get()
+            if not data:
+                self.reset()
+                raise StopIteration
+            return data
+
+    def __iter__(self):
+        return self
+
+    @staticmethod
+    def process_data(batch_raw_data, max_seq_len, shuffle, sort_by_length):
+        batch = [sample.strip().split('\t') for sample in batch_raw_data]
+        if shuffle is True:
+            np.random.shuffle(batch)
+        if sort_by_length is True:
+            batch.sort(key=lambda x: float(x[6]))
+        uid = []
+        iid = []
+        cid = []
+        label = []
+        hist_iid_seq = []
+        hist_cid_seq = []
+        hist_seq_len = []
+        sample_weight = []
+        rating = []
+        for sample in batch:
+            uid.append(int(sample[0]))
+            iid.append(int(sample[1]))
+            cid.append(int(sample[2]))
+            label.append(float(sample[3]))
+            hist_iid_seq.append(
+                list(
+                    map(
+                        lambda x: int(x) if x else 0,
+                        sample[4].strip().split(' ')
+                    )
+                )
+            )
+            hist_cid_seq.append(
+                list(
+                    map(
+                        lambda x: int(x) if x else 0,
+                        sample[5].strip().split(' ')
+                    )
+                )
+            )
+            hist_seq_len.append(int(sample[6]))
+            sample_weight.append(float(sample[7]))
+            rating.append(sample[8])
+        uid = np.array(uid).reshape(-1, 1)
+        iid = np.array(iid).reshape(-1, 1)
+        cid = np.array(cid).reshape(-1, 1)
+        label = np.array(label).reshape(-1, 1)
+        hist_iid_seq = keras.preprocessing.sequence.pad_sequences(
+            hist_iid_seq, maxlen=max_seq_len, dtype='int64',
+            padding='post', truncating='pre', value=0
+        )
+        hist_cid_seq = keras.preprocessing.sequence.pad_sequences(
+            hist_cid_seq, maxlen=max_seq_len, dtype='int64',
+            padding='post', truncating='pre', value=0
+        )
+        hist_seq_len = np.array(hist_seq_len).reshape(-1, 1)
+        sample_weight = np.array(sample_weight).reshape(-1, 1)
+        return uid, iid, cid, label, hist_iid_seq, hist_cid_seq, hist_seq_len, sample_weight, rating

@@ -1,10 +1,16 @@
 import os
-import pandas as pd
-from collections import defaultdict
-from basek.utils.imports import numpy as np
-from tqdm import tqdm
+import pickle
 import time
+from collections import defaultdict
+from functools import partial
+from queue import Queue
+from threading import Thread
+
+import pandas as pd
+from tqdm import tqdm
+
 from basek.utils.tf_compat import keras
+from basek.utils.imports import numpy as np
 
 
 def read_reviews(file_path, true_sample_weight=1.0, neg_sampes=0, neg_sample_weight=1.0):
@@ -38,8 +44,9 @@ def read_reviews(file_path, true_sample_weight=1.0, neg_sampes=0, neg_sample_wei
     item_size = len(item_count) + 2
     cate_size = len(cate_count) + 2
     sparse_features_max_idx = {'uid': user_size, 'iid': item_size, 'cid': cate_size}
-    print('-' * 16 + f'    user_size: {user_size}, item_size: {item_size}, ' +
-          f'cate_size: {cate_size}    ' + '-' * 16)
+    serialized_sparse_features_max_idx = pickle.dumps(sparse_features_max_idx)
+    with open(os.path.join(dir_path, 'sparse_features_max_idx'), 'wb') as f:
+        f.write(serialized_sparse_features_max_idx)
 
     item_to_iid = {'null': 0, 'default_item': 1}
     iid_to_item = {0: 'null', 1: 'default_item'}
@@ -72,6 +79,9 @@ def read_reviews(file_path, true_sample_weight=1.0, neg_sampes=0, neg_sample_wei
     all_iid_index = list(range(item_size))
     all_cid_index = list(iid_to_cid.loc[all_iid_index].values)
     all_indices = all_iid_index, all_cid_index
+    serialized_all_indices = pickle.dumps(all_indices)
+    with open(os.path.join(dir_path, 'all_indices'), 'wb') as f:
+        f.write(serialized_all_indices)
 
     user_to_uid = {'null': 0, 'default_user': 1}
     uid_to_user = {0: 'null', 1: 'default_user'}
@@ -148,9 +158,12 @@ def read_reviews(file_path, true_sample_weight=1.0, neg_sampes=0, neg_sample_wei
                         ) + '\n'
                     )
     total_train_samples = true_train_samples + neg_train_samples
-    print('-' * 4 + f'  {total_train_samples} training samples, ' +
-          f'{true_train_samples} of them are true_train_samples, ' +
-          f'{neg_train_samples} of them are neg_train_samples  ' + '-' * 4)
+    print('=' * 120)
+    print(
+        '-' * 4 + f'  {total_train_samples} training samples, ' +
+        f'{true_train_samples} of them are true_train_samples, ' +
+        f'{neg_train_samples} of them are neg_train_samples  ' + '-' * 4
+    )
     print('-' * 32 + f'    {test_samples} testing samples    ' + '-' * 32)
 
     return (train_file, test_file), sparse_features_max_idx, all_indices
@@ -163,33 +176,55 @@ class DataLoader():
         max_seq_len=100, prefetch_batch=10,
         shuffle=False, sort_by_length=False
     ):
-        self.file_path = file_path
+        self.source = open(file_path, 'r')
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.prefetch_batch = prefetch_batch
         self.shuffle = shuffle
         self.sort_by_length = sort_by_length
         self.buffer_size = self.batch_size * self.prefetch_batch
-        self.f_in = self.f_in = open(self.file_path, 'r')
-        self.buffer = []
+        self.__init()
 
-    def __next__(self):
-        curr_buffer_size = len(self.buffer)
-        if curr_buffer_size <= self.batch_size:
-            for _ in range(self.buffer_size):
-                line = self.f_in.readline()
+    def __init(self):
+        self.processor = partial(
+            self.process_data,
+            max_seq_len=self.max_seq_len, shuffle=self.shuffle, sort_by_length=self.sort_by_length
+        )
+        self.data_buffer = Queue(maxsize=self.prefetch_batch)
+        self.reset()
+
+    def reset(self):
+        self.source.seek(0)
+        self.data_loader = Thread(target=self.load_data)
+        self.data_loader.daemon = True
+        self.data_loader.start()
+
+    def load_data(self):
+        end_of_file = False
+        while True:
+            if self.data_buffer.qsize() >= self.prefetch_batch:
+                continue
+            batch_raw_data = []
+            for _ in range(self.batch_size):
+                line = self.source.readline()
                 if not line:
+                    end_of_file = True
                     break
-                self.buffer.append(line)
-        batch, self.buffer = self.buffer[:self.batch_size], self.buffer[self.batch_size:]
-        batch = [sample.strip().split('\t') for sample in batch]
-        if not batch:
-            self.f_in.seek(0)
-            raise StopIteration
-        if self.shuffle is True:
+                batch_raw_data.append(line)
+            if batch_raw_data:
+                batch_data = self.processor(batch_raw_data)
+                self.data_buffer.put(batch_data)
+            if end_of_file:
+                break
+        self.data_buffer.put(None)
+
+    @staticmethod
+    def process_data(batch_raw_data, max_seq_len, shuffle, sort_by_length):
+        batch = [sample.strip().split('\t') for sample in batch_raw_data]
+        if shuffle is True:
             np.random.shuffle(batch)
-        if self.sort_by_length is True:
-            batch.sort(lambda x: int())
+        if sort_by_length is True:
+            batch.sort(key=lambda x: float(x[6]))
         uid = []
         iid = []
         cid = []
@@ -228,16 +263,24 @@ class DataLoader():
         cid = np.array(cid).reshape(-1, 1)
         label = np.array(label).reshape(-1, 1)
         hist_iid_seq = keras.preprocessing.sequence.pad_sequences(
-            hist_iid_seq, maxlen=self.max_seq_len, dtype='int64',
+            hist_iid_seq, maxlen=max_seq_len, dtype='int64',
             padding='post', truncating='pre', value=0
         )
         hist_cid_seq = keras.preprocessing.sequence.pad_sequences(
-            hist_cid_seq, maxlen=self.max_seq_len, dtype='int64',
+            hist_cid_seq, maxlen=max_seq_len, dtype='int64',
             padding='post', truncating='pre', value=0
         )
         hist_seq_len = np.array(hist_seq_len).reshape(-1, 1)
         sample_weight = np.array(sample_weight).reshape(-1, 1)
         return uid, iid, cid, label, hist_iid_seq, hist_cid_seq, hist_seq_len, sample_weight, rating
+
+    def __next__(self):
+        while True:
+            data = self.data_buffer.get()
+            if not data:
+                self.reset()
+                raise StopIteration
+            return data
 
     def __iter__(self):
         return self

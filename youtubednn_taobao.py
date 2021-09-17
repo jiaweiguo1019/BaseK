@@ -1,4 +1,5 @@
 import os
+import pickle
 from time import localtime, strftime, time
 
 import faiss
@@ -13,7 +14,6 @@ from basek.utils.tf_compat import tf, keras
 
 from basek.layers.base import BiasAdd, Concatenate, Dense, Embedding, Flatten, Index, Input, Lambda
 
-from params import args
 
 SEQ_LEN = 20
 VALIDATION_SPLIT = True
@@ -34,14 +34,27 @@ if __name__ == '__main__':
 
     data_path = './datasets/Taobao/UserBehavior.csv'
     sparse_features = ['uid', 'iid', 'cid']
-    data_file, sparse_features_max_idx, all_indices = read_reviews(data_path)
-    train_file, test_file = data_file
+    # data_files, sparse_features_max_idx, all_indices = read_reviews(data_path)
+    data_files = './datasets/Taobao/train', './datasets/Taobao/test'
+    with open('./datasets/Taobao/sparse_features_max_idx', 'rb') as f:
+        serialized_sparse_features_max_idx = f.read()
+        sparse_features_max_idx = pickle.loads(serialized_sparse_features_max_idx)
+    with open('./datasets/Taobao/all_indices', 'rb') as f:
+        serialized_all_indices = f.read()
+        all_indices = pickle.loads(serialized_all_indices)
 
+    train_file, test_file = data_files
     train_input = DataLoader(train_file, BATCH_SIZE, SEQ_LEN)
-    val_input = DataLoader(test_file, 2 ** 32, SEQ_LEN)
+    val_input = DataLoader(test_file, BATCH_SIZE * 100, SEQ_LEN)
     user_size = sparse_features_max_idx['uid']
     item_size = sparse_features_max_idx['iid']
     cate_size = sparse_features_max_idx['cid']
+    all_iid_index, all_cid_index = all_indices
+    print('=' * 120)
+    print(
+        '-' * 16 + f'    user_size: {user_size}, item_size: {item_size}, ' +
+        f'cate_size: {cate_size}    ' + '-' * 16
+    )
 
     timestamp = strftime("%Y%m%d_%H%M%S", localtime())
     ckpt_path = './ckpts/' + timestamp
@@ -125,7 +138,6 @@ if __name__ == '__main__':
     model.summary()
 
     # for evaluate
-    all_iid_index, all_cid_index = all_indices
     all_iid_index, all_cid_index = \
         Index(all_iid_index, name='all_iid_index'), Index(all_cid_index, name='all_cid_index')
     all_iid_emb = iid_emb_layer(all_iid_index())
@@ -194,7 +206,6 @@ if __name__ == '__main__':
             index.add(val_all_item_out)
             hits, ndcgs = [[] for _ in range(len(MATCH_NUMS))], [[] for _ in range(len(MATCH_NUMS))]
             for val_data in val_input:
-                batch_num += 1
                 uid_, iid_, cid_, label_, hist_iid_seq_, hist_cid_seq_, \
                     hist_seq_len_, sample_weight_, rating_ = val_data
                 batch_loss, val_user_out = sess.run(
@@ -206,6 +217,7 @@ if __name__ == '__main__':
                         hist_seq_len: hist_seq_len_
                     }
                 )
+                print('\r' + '-' * 42 + f'  batch_loss: {batch_loss:.8f}  ' + '-' * 42, end='')
                 num_batch_sample = len(uid_)
                 total_loss += batch_loss * num_batch_sample
                 total_samples += num_batch_sample
@@ -215,7 +227,7 @@ if __name__ == '__main__':
                     hit_i.extend(batch_hits[idx])
                     ndcg_i.extend(batch_ndcgs[idx])
             val_loss = total_loss / total_samples
-            print(f'val_loss  of  epoch-{epoch + 1}: {val_loss:.8f}    ' + '-' * 72)
+            print(f'\nval_loss  of  epoch-{epoch + 1}: {val_loss:.8f}    ' + '-' * 72)
             # faiss.normalize_L2(val_user_out)
             # faiss.normalize_L2(val_all_item_out)
             for idx, (hit_i, ndcg_i) in enumerate(zip(hits, ndcgs)):

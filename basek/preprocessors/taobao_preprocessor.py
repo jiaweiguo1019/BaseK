@@ -27,7 +27,7 @@ def read_reviews(file_path, true_sample_weight=1.0, neg_sampes=0, neg_sample_wei
     item_to_cate = {'null': 'null', 'default_item': 'default_cate'}
     with open(file_path, 'r') as f:
         # for line in tqdm(f):
-        for _ in tqdm(range(100000)):
+        for _ in tqdm(range(1000000)):
             line = f.readline()
             line = line.strip().split(',')
             user, item, cate, behavior, timestamp = line

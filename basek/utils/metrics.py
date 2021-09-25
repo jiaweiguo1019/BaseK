@@ -28,8 +28,3 @@ def compute_metrics(I, match_nums, uid, iid):
                 ndcg_i.append(0.0)
 
     return hits, ndcgs
-    for idx, (hit_i, ndcg_i) in enumerate(zip(hits, ndcgs)):
-        mean_hr = np.mean(hit_i)
-        mean_ndcg = np.mean(ndcg_i)
-        print('-' * 36 +
-              f'  HR@{match_nums[idx]}: {mean_hr:.6f}, NDCG@{match_nums[idx]}: {mean_ndcg:.6f}  ' + '-' * 36)

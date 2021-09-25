@@ -141,7 +141,7 @@ if __name__ == '__main__':
     model.summary()
 
     # for evaluate
-    all_item_index = Index(item_size)
+    all_item_index = Index(list(range(item_size)))
     all_item_emb = iid_emb_layer(all_item_index())
     all_item_out = Flatten()(all_item_emb)
     index = faiss.IndexFlatIP(EMB_DIM)

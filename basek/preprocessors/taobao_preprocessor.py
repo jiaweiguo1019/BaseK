@@ -173,16 +173,16 @@ class DataLoader():
 
     def __init__(
         self, file_path, batch_size,
-        max_seq_len=100, prefetch_batch=10,
+        max_seq_len=100, prefetch_batches=10,
         shuffle=False, sort_by_length=False
     ):
         self.source = open(file_path, 'r')
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
-        self.prefetch_batch = prefetch_batch
+        self.prefetch_batches = prefetch_batches
         self.shuffle = shuffle
         self.sort_by_length = sort_by_length
-        self.buffer_size = self.batch_size * self.prefetch_batch
+        self.buffer_size = self.batch_size * self.prefetch_batches
         self.__init()
 
     def __init(self):
@@ -190,7 +190,7 @@ class DataLoader():
             self.process_data,
             max_seq_len=self.max_seq_len, shuffle=self.shuffle, sort_by_length=self.sort_by_length
         )
-        self.data_buffer = Queue(maxsize=self.prefetch_batch)
+        self.data_buffer = Queue(maxsize=self.prefetch_batches)
         self.reset()
 
     def reset(self):
@@ -200,31 +200,36 @@ class DataLoader():
         self.data_loader.start()
 
     def load_data(self):
-        end_of_file = False
         while True:
-            if self.data_buffer.qsize() >= self.prefetch_batch:
+            if self.data_buffer.qsize() >= self.prefetch_batches:
                 continue
-            batch_raw_data = []
-            for _ in range(self.batch_size):
+            raw_data = []
+            for _ in range(self.buffer_size):
                 line = self.source.readline()
-                if not line:
-                    end_of_file = True
+                if line:
+                    raw_data.append(line)
+                else:
                     break
-                batch_raw_data.append(line)
-            if batch_raw_data:
-                batch_data = self.processor(batch_raw_data)
-                self.data_buffer.put(batch_data)
-            if end_of_file:
+            if raw_data:
+                total_data = self.processor(raw_data)
+                total_size = len(total_data[0])
+                for i in range(0, total_size, self.batch_size):
+                    batch_data = []
+                    for data in total_data:
+                        batch_data.append(data[i * self.batch_size: (i + 1) * self.batch_size])
+                    batch_data = tuple(batch_data)
+                    self.data_buffer.put(batch_data)
+            else:
                 break
         self.data_buffer.put(None)
 
     @staticmethod
-    def process_data(batch_raw_data, max_seq_len, shuffle, sort_by_length):
-        batch = [sample.strip().split('\t') for sample in batch_raw_data]
+    def process_data(raw_data, max_seq_len, shuffle, sort_by_length):
+        data = [sample.strip().split('\t') for sample in raw_data]
         if shuffle is True:
-            np.random.shuffle(batch)
+            np.random.shuffle(data)
         if sort_by_length is True:
-            batch.sort(key=lambda x: float(x[6]))
+            data.sort(key=lambda x: float(x[6]))
         uid = []
         iid = []
         cid = []
@@ -234,7 +239,7 @@ class DataLoader():
         hist_seq_len = []
         sample_weight = []
         rating = []
-        for sample in batch:
+        for sample in data:
             uid.append(int(sample[0]))
             iid.append(int(sample[1]))
             cid.append(int(sample[2]))

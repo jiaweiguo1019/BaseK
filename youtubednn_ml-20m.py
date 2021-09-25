@@ -1,14 +1,13 @@
 import os
-import pickle
+import pickle as pkl
 from time import localtime, strftime, time
 
 import faiss
 from basek.utils.imports import numpy as np
 from basek.utils.imports import random
-from tqdm import tqdm
 
 from basek.params import args
-from basek.preprocessors.taobao_preprocessor import read_reviews, DataLoader
+from basek.preprocessors.ml_20m_preprocessor import read_reviews, DataLoader
 from basek.utils.metrics import compute_metrics
 from basek.utils.tf_compat import tf, keras
 
@@ -20,7 +19,7 @@ VALIDATION_SPLIT = True
 NEG_SAMPLES = 0
 EMB_DIM = 32
 EPOCHS = args.epochs
-BATCH_SIZE = 256
+BATCH_SIZE = 2048
 MATCH_NUMS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200]
 MAX_MATCH_NUM = 200
 
@@ -32,20 +31,21 @@ if __name__ == '__main__':
     tf.set_random_seed(seed)
     random.seed(seed)
 
-    data_path = './datasets/Taobao/UserBehavior.csv'
     sparse_features = ['uid', 'iid', 'cid']
-    data_files, sparse_features_max_idx, all_indices = read_reviews(data_path)
-    # data_files = './datasets/Taobao/train', './datasets/Taobao/test'
-    # with open('./datasets/Taobao/sparse_features_max_idx', 'rb') as f:
-    #     serialized_sparse_features_max_idx = f.read()
-    #     sparse_features_max_idx = pickle.loads(serialized_sparse_features_max_idx)
-    # with open('./datasets/Taobao/all_indices', 'rb') as f:
-    #     serialized_all_indices = f.read()
-    #     all_indices = pickle.loads(serialized_all_indices)
+    meta_path = './datasets/MovieLens/ml-20m/movies.csv'
+    review_path = './datasets/MovieLens/ml-20m/ratings.csv'
+    data_files, sparse_features_max_idx_path, all_indices_path = read_reviews(meta_path, review_path, NEG_SAMPLES)
+    # data_files = './datasets/Amazon/train.pkl', './datasets/Amazon/test.pkl'
+    # sparse_features_max_idx_path = './datasets/Amazon/sparse_features_max_idx.pkl'
+    # all_indices_path = './datasets/Amazon/all_indices.pkl'
+    with open(sparse_features_max_idx_path, 'rb') as f:
+        sparse_features_max_idx = pkl.load(f)
+    with open(all_indices_path, 'rb') as f:
+        all_indices = pkl.load(f)
 
     train_file, test_file = data_files
-    train_input = DataLoader(train_file, BATCH_SIZE, SEQ_LEN)
-    val_input = DataLoader(test_file, BATCH_SIZE * 100, SEQ_LEN)
+    train_input = DataLoader(train_file, SEQ_LEN, BATCH_SIZE, )
+    val_input = DataLoader(test_file, SEQ_LEN, BATCH_SIZE * 10)
     user_size = sparse_features_max_idx['uid']
     item_size = sparse_features_max_idx['iid']
     cate_size = sparse_features_max_idx['cid']
@@ -143,7 +143,10 @@ if __name__ == '__main__':
     all_iid_emb = iid_emb_layer(all_iid_index())
     all_cid_emb = cid_emb_layer(all_cid_index())
     all_item_out = Flatten()(all_iid_emb + all_cid_emb)
-    index = faiss.IndexFlatIP(EMB_DIM)
+    res = faiss.StandardGpuResources()
+    flat_config = faiss.GpuIndexFlatConfig()
+    flat_config.device = 0
+    index = faiss.GpuIndexFlatL2(res, EMB_DIM, flat_config)
 
     # definde loss and train_op
     bias = tf.get_variable(name='bias', shape=[item_size], initializer=tf.initializers.zeros(), trainable=False)
@@ -152,7 +155,7 @@ if __name__ == '__main__':
         biases=bias,
         labels=iid,
         inputs=user_out,
-        num_sampled=160,
+        num_sampled=1024,
         num_classes=item_size
     )
     loss = tf.reduce_mean(loss)
@@ -179,7 +182,7 @@ if __name__ == '__main__':
             for train_data in train_input:
                 batch_num += 1
                 uid_, iid_, cid_, label_, hist_iid_seq_, hist_cid_seq_, \
-                    hist_seq_len_, sample_weight_, rating_ = train_data
+                    hist_seq_len_, rating_, sample_weight_ = train_data
                 batch_loss, _ = sess.run(
                     [
                         loss, train_op
@@ -207,7 +210,7 @@ if __name__ == '__main__':
             hits, ndcgs = [[] for _ in range(len(MATCH_NUMS))], [[] for _ in range(len(MATCH_NUMS))]
             for val_data in val_input:
                 uid_, iid_, cid_, label_, hist_iid_seq_, hist_cid_seq_, \
-                    hist_seq_len_, sample_weight_, rating_ = val_data
+                    hist_seq_len_, rating_, sample_weight_ = val_data
                 batch_loss, val_user_out = sess.run(
                     [loss, user_out],
                     feed_dict={

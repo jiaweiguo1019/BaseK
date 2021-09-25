@@ -20,32 +20,23 @@ def read_raw_dataset(
 ):
 
     item_to_cate = {'null': 'null', 'default': 'default'}
-    with open(meta_path, 'r') as f:
-        for line in tqdm(f):
-            line = eval(line)
-            item = str(line['asin'])
-            cate = str(line['categories'][-1][-1])
-            item_to_cate[item] = cate
+    meta_df_from_csv = pd.read_csv('./datasets/MovieLens/ml-20m/movies.csv')
+    for row in tqdm(meta_df_from_csv.itertuples()):
+        _, movieId, title, genres = row
+        item = movieId
+        cate = genres.strip().split('|')[-1]
+        item_to_cate[item] = cate
     item_to_cate = pd.Series(item_to_cate)
     item_to_cate.to_pickle(item_to_cate_path)
 
-    with open(review_path, 'r') as f:
-        data = {}
-        for i, line in tqdm(enumerate(f)):
-            line = eval(line)
-            user = str(line['reviewerID'])
-            item = str(line['asin'])
-            rating = float(line['overall'])
-            timestamp = int(line['unixReviewTime'])
-            cate = item_to_cate[item]
-            data[i] = {
-                'user': user,
-                'item': item,
-                'cate': cate,
-                'rating': rating,
-                'timestamp': timestamp
-            }
-    raw_dataset_df = pd.DataFrame.from_dict(data, orient='index')
+    review_df_from_csv = pd.read_csv('./datasets/MovieLens/ml-20m/ratings.csv')
+    review_df_from_csv['cate'] = review_df_from_csv['movieId'].map(item_to_cate)
+    raw_dataset_df = pd.DataFrame()
+    raw_dataset_df['user'] = review_df_from_csv['userId']
+    raw_dataset_df['item'] = review_df_from_csv['movieId']
+    raw_dataset_df['cate'] = review_df_from_csv['cate']
+    raw_dataset_df['rating'] = review_df_from_csv['rating']
+    raw_dataset_df['timestamp'] = review_df_from_csv['timestamp']
     raw_dataset_df.drop_duplicates(['user', 'item', 'timestamp'], inplace=True)
     raw_dataset_df.sort_values('timestamp', inplace=True)
     raw_dataset_df.index = list(range(len(raw_dataset_df)))

@@ -7,25 +7,26 @@ from sklearn.preprocessing import LabelEncoder
 from basek.utils.tf_compat import keras
 
 
-def read_csv(data_path):
-    user_names = ['user_id', 'gender', 'age', 'occupation', 'zip']
-    users = pd.read_csv(
-        data_path + '/users.dat', sep='::', header=None, names=user_names, encoding='latin-1'
-    )
-    rating_names = ['user_id', 'movie_id', 'rating', 'timestamp']
-    ratings = pd.read_csv(
-        data_path + '/ratings.dat', sep='::', header=None, names=rating_names, encoding='latin-1'
-    )
-    movie_names = ['movie_id', 'title', 'genres']
-    movies = pd.read_csv(
-        data_path + '/movies.dat', sep='::', header=None, names=movie_names, encoding='latin-1'
-    )
-    data = pd.merge(pd.merge(ratings, movies), users)
-    return data
-
-
 # def read_csv(data_path):
-#     return pd.read_csv('./datasets/movielens_sample.txt')
+#     user_names = ['user_id', 'gender', 'age', 'occupation', 'zip']
+#     users = pd.read_csv(
+#         data_path + '/users.dat', sep='::', header=None, names=user_names, encoding='latin-1'
+#     )
+#     rating_names = ['user_id', 'movie_id', 'rating', 'timestamp']
+#     ratings = pd.read_csv(
+#         data_path + '/ratings.dat', sep='::', header=None, names=rating_names, encoding='latin-1'
+#     )
+#     movie_names = ['movie_id', 'title', 'genres']
+#     movies = pd.read_csv(
+#         data_path + '/movies.dat', sep='::', header=None, names=movie_names, encoding='latin-1'
+#     )
+#     data = pd.merge(pd.merge(ratings, movies), users)
+#     return data
+
+
+def read_csv(data_path):
+    return pd.read_csv('./datasets/movielens/ml-1m_merged.csv', sep='^')
+    # return pd.read_csv('./datasets/movielens_sample.txt')
 
 
 def index_sparse_features(data, sparse_features):
@@ -149,10 +150,10 @@ def gen_model_input(dataset, user_profile, item_profile, seq_max_len, ):
         hist_item_seq, maxlen=seq_max_len, padding='post', truncating='pre', value=0, dtype='int64'
     )
 
-    gender = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
-    age = user_profile.loc[uid.reshape(-1)]['age'].values.reshape(-1, 1)
-    occupation = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
-    zip = user_profile.loc[uid.reshape(-1)]['gender'].values.reshape(-1, 1)
+    gender = user_profile.loc[uid]['gender'].values
+    age = user_profile.loc[uid]['age'].values
+    occupation = user_profile.loc[uid]['gender'].values
+    zip = user_profile.loc[uid]['gender'].values
 
     model_input = {
         'uid': uid.reshape(-1, 1), 'iid': iid.reshape(-1, 1), 'label': label.reshape(-1, 1),
@@ -164,4 +165,3 @@ def gen_model_input(dataset, user_profile, item_profile, seq_max_len, ):
     }
 
     return model_input
-

@@ -47,8 +47,6 @@ def read_raw_dataset(
             }
     raw_dataset_df = pd.DataFrame.from_dict(data, orient='index')
     raw_dataset_df.drop_duplicates(['user', 'item', 'timestamp'], inplace=True)
-    raw_dataset_df.sort_values('timestamp', inplace=True)
-    raw_dataset_df.index = list(range(len(raw_dataset_df)))
     raw_dataset_df.to_pickle(raw_dataset_path)
 
     return item_to_cate, raw_dataset_df
@@ -89,6 +87,7 @@ def process_raw_dataset(
             raise ValueError(f'k_core should be an integer greater than 1, got {k_core}')
         processed_raw_dataset_df = reduce_to_k_core(processed_raw_dataset_df, k_core)
 
+    processed_raw_dataset_df.sort_values('timestamp', inplace=True)
     processed_raw_dataset_df.index = list(range(len(raw_dataset_df)))
     processed_raw_dataset_df.to_pickle(processed_raw_dataset_path)
 
@@ -116,7 +115,7 @@ def build_entity_id_map(entity_count, entity_prefix='default', id_prefix='defaul
 
 
 def read_reviews(
-    meta_path, review_path,
+    meta_path, review_path, split_ratio=0.1,
     neg_sampes=0, unique_neg_sample=True,
     true_sample_weight=1.0, neg_sample_weight=1.0,
     pos_label=1.0, neg_label=0.0, neg_sample_rating=0.0,
@@ -177,95 +176,126 @@ def read_reviews(
     converted_dataset_df['cid'] = processed_raw_dataset_df['cate'].map(cate_to_cid)
     converted_dataset_df['rating'] = processed_raw_dataset_df['rating']
 
+    split_idx = int(len(converted_dataset_df) * (1.0 - split_ratio))
+    train_df = converted_dataset_df.iloc[:split_idx]
+    test_df = converted_dataset_df.iloc[split_idx:]
+
     curr_uid_count = defaultdict(int)
-    uid_hist_iid_seq = defaultdict(list)
-    uid_hist_cid_seq = defaultdict(list)
-    true_train_samples, neg_train_samples, test_samples = 0, 0, 0
-    with open(train_path, 'wb') as f_train, open(test_path, 'wb') as f_test:
-        print('-' * 32 + '    writing samples    ' + '-' * 32)
-        for row in tqdm(converted_dataset_df.itertuples()):
+    hist_iid_seq = defaultdict(list)
+    hist_cid_seq = defaultdict(list)
+    hist_rating_seq = defaultdict(list)
+    num_true_samples, num_neg_samples, num_test_samples = 0, 0, 0
+
+    with open(train_path, 'wb') as f:
+        print('-' * 32 + '    writing traing samples    ' + '-' * 32)
+        for row in tqdm(train_df.itertuples()):
             _, uid, iid, cid, rating = row
-            hist_seq_len = curr_uid_count[uid]
+
+            uid_hist_seq_len = curr_uid_count[uid]
             curr_uid_count[uid] += 1
-            is_test_sample = False
-            if curr_uid_count[uid] == uid_count[uid]:
-                f_out = f_test
-                test_samples += 1
-                is_test_sample = True
-            else:
-                f_out = f_train
-                true_train_samples += 1
-            hist_iid_seq = uid_hist_iid_seq[uid]
-            hist_cid_seq = uid_hist_cid_seq[uid]
-            uid_hist_iid_seq[uid] = hist_iid_seq + [iid]
-            uid_hist_cid_seq[uid] = hist_cid_seq + [cid]
+            uid_hist_iid_seq = hist_iid_seq[uid]
+            uid_hist_cid_seq = hist_cid_seq[uid]
+            uid_hist_rating_seq = hist_rating_seq[uid]
+            hist_iid_seq[uid] = uid_hist_iid_seq + [iid]
+            hist_cid_seq[uid] = uid_hist_cid_seq + [cid]
+            hist_rating_seq[uid] = uid_hist_rating_seq + [rating]
             train_sample = (
-                uid, iid, cid, pos_label,
-                hist_iid_seq, hist_cid_seq, hist_seq_len,
-                rating, true_sample_weight
+                uid, iid, cid, rating, pos_label,
+                uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_rating_seq, uid_hist_seq_len,
+                true_sample_weight
             )
-            pkl.dump(train_sample, f_out)
-            if neg_sampes > 0 and not is_test_sample:
-                neg_samples_iid = set()
-                neg_samples_cid = set()
-                for _ in range(neg_sampes):
-                    neg_train_samples += 1
-                    while True:
-                        neg_iid = np.random.choice(iid_size)
-                        if neg_iid == iid:
+            pkl.dump(train_sample, f)
+            num_true_samples += 1
+
+            if neg_sampes == 0:
+                continue
+            neg_samples_iid = set()
+            neg_samples_cid = set()
+            for _ in range(neg_sampes):
+                while True:
+                    neg_iid = np.random.choice(iid_size)
+                    if neg_iid == iid:
+                        continue
+                    else:
+                        if unique_neg_sample and neg_iid in neg_samples_iid:
                             continue
                         else:
-                            if unique_neg_sample and neg_iid in neg_samples_iid:
-                                continue
-                            else:
-                                neg_samples_iid.add(neg_iid)
-                                neg_cid = iid_to_cid[neg_iid]
-                                neg_samples_cid.add(cid)
-                                break
-                    neg_train_sample = (
-                        uid, neg_iid, neg_cid, neg_label,
-                        hist_iid_seq, hist_cid_seq, hist_seq_len,
-                        neg_sample_rating, neg_sample_weight
-                    )
-                    pkl.dump(neg_train_sample, f_out)
+                            neg_samples_iid.add(neg_iid)
+                            neg_cid = iid_to_cid[neg_iid]
+                            neg_samples_cid.add(cid)
+                            break
+                neg_train_sample = (
+                    uid, neg_iid, neg_cid, neg_sample_rating, neg_label,
+                    uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_rating_seq, uid_hist_seq_len,
+                    neg_sample_weight
+                )
+                pkl.dump(neg_train_sample, f)
+                num_neg_samples += 1
 
-    total_train_samples = true_train_samples + neg_train_samples
+        total_train_samples = num_true_samples + num_neg_samples
+
+    with open(test_path, 'wb') as f:
+        for uid, u_hist in test_df.groupby('uid'):
+            uid_hist_seq_len = curr_uid_count[uid]
+            uid_hist_iid_seq = hist_iid_seq[uid]
+            uid_hist_cid_seq = hist_cid_seq[uid]
+            uid_hist_rating_seq = hist_rating_seq[uid]
+            groud_truth_iid_seq = u_hist['iid'].tolist()
+            groud_truth_cid_seq = u_hist['cid'].tolist()
+            groud_truth_rating_seq = u_hist['raing'].tolist()
+            num_test_samples += len(groud_truth_iid_seq)
+            test_sample = (
+                uid, uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_rating_seq, uid_hist_seq_len
+            )
+            hist_iid_rating_map = dict(zip(uid_hist_iid_seq, uid_hist_rating_seq))
+            hist_cid_rating_map = dict(zip(uid_hist_cid_seq, uid_hist_rating_seq))
+            groud_truth_iid_rating_map = dict(zip(groud_truth_iid_seq, groud_truth_rating_seq))
+            groud_truth_cid_rating_map = dict(zip(groud_truth_cid_seq, groud_truth_rating_seq))
+            groud_truth = (
+                groud_truth_iid_rating_map,
+                groud_truth_cid_rating_map,
+                hist_iid_rating_map,
+                hist_cid_rating_map
+            )
+            pkl.dump((test_sample, groud_truth), f)
+
     print('=' * 120)
     print(
-        '-' * 4 + f'  {total_train_samples} training samples, ' +
-        f'{true_train_samples} of them are true_train_samples, ' +
-        f'{neg_train_samples} of them are neg_train_samples  ' + '-' * 4
+        '-' * 8 + f'  {total_train_samples} training samples, ' +
+        f'{num_true_samples} of them are true_samples, ' +
+        f'{num_neg_samples} of them are neg_samples  ' + '-' * 8
     )
-    print('-' * 32 + f'    {test_samples} testing samples    ' + '-' * 32)
+    print('-' * 32 + f'    {num_test_samples} testing samples    ' + '-' * 32)
 
     dataset_files = train_path, test_path
     return dataset_files, sparse_features_max_idx_path, all_indices_path
 
 
-def process_data(batch_data, max_seq_len, shuffle, sort_by_length):
+def process_data(batch_data, max_seq_len, shuffle, sort_by_length, kind):
     if shuffle is True:
         np.random.shuffle(batch_data)
     if sort_by_length is True:
         batch_data.sort(key=lambda x: float(x[6]))
-    uid = []
-    iid = []
-    cid = []
-    label = []
-    hist_iid_seq = []
-    hist_cid_seq = []
-    hist_seq_len = []
-    rating = []
-    sample_weight = []
-    for sample in batch_data:
-        uid.append(sample[0])
-        iid.append(sample[1])
-        cid.append(sample[2])
-        label.append(sample[3])
-        hist_iid_seq.append(sample[4])
-        hist_cid_seq.append(sample[5])
-        hist_seq_len.append(sample[6])
-        rating.append(sample[7])
-        sample_weight.append(sample[8])
+    uid, iid, cid, label, hist_iid_seq, hist_cid_seq, hist_seq_len, rating, sample_weight, ground_truth = \
+        [], [], [], [], [], [], [], [], []
+    if kind == 'train':
+        for sample in batch_data:
+            uid.append(sample[0])
+            iid.append(sample[1])
+            cid.append(sample[2])
+            label.append(sample[3])
+            hist_iid_seq.append(sample[4])
+            hist_cid_seq.append(sample[5])
+            hist_seq_len.append(sample[6])
+            rating.append(sample[7])
+            sample_weight.append(sample[8])
+    else:
+        for sample, per_ground_truth in batch_data:
+            uid.append(sample[0])
+            hist_iid_seq.append(sample[1])
+            hist_cid_seq.append(sample[2])
+            hist_seq_len.append(sample[3])
+            ground_truth.append(per_ground_truth)
     uid = np.array(uid).reshape(-1, 1).astype(np.int64)
     iid = np.array(iid).reshape(-1, 1).astype(np.int64)
     cid = np.array(cid).reshape(-1, 1).astype(np.int64)
@@ -281,7 +311,10 @@ def process_data(batch_data, max_seq_len, shuffle, sort_by_length):
     hist_seq_len = np.array(hist_seq_len).reshape(-1, 1).astype(np.int64)
     rating = np.array(rating).reshape(-1, 1).astype(np.float32)
     sample_weight = np.array(sample_weight).reshape(-1, 1).astype(np.float32)
-    return uid, iid, cid, label, hist_iid_seq, hist_cid_seq, hist_seq_len, rating, sample_weight
+    if kind == 'train':
+        return uid, iid, cid, label, hist_iid_seq, hist_cid_seq, hist_seq_len, rating, sample_weight
+    else:
+        return (uid, hist_iid_seq, hist_cid_seq, hist_seq_len), ground_truth
 
 
 class DataLoader():
@@ -289,7 +322,8 @@ class DataLoader():
     def __init__(
         self, source, batch_size,
         max_seq_len=100, prefetch_batches=100,
-        shuffle=False, sort_by_length=False
+        shuffle=True, sort_by_length=True,
+        max_workers=8, kind='train'
     ):
         self.source = source
         self.batch_size = batch_size
@@ -297,10 +331,16 @@ class DataLoader():
         self.prefetch_batches = prefetch_batches
         self.shuffle = shuffle
         self.sort_by_length = sort_by_length
-        self.buffer_size = self.batch_size * self.prefetch_batches
+        self.max_workers = max_workers
+        kind = kind.lower()
+        if kind not in ('train', 'test'):
+            raise ValueError(f'unknown kind for dataloader: {kind}!')
+        self.kind = kind
+
         self.__init()
 
     def __init(self):
+        self.buffer_size = self.batch_size * self.prefetch_batches
         self.data_buffer = Queue()
         self.reset()
 
@@ -309,21 +349,23 @@ class DataLoader():
             target=self.load_data,
             args=(
                 self.source, self.data_buffer, self.batch_size, self.prefetch_batches,
-                self.max_seq_len, self.shuffle, self.sort_by_length
+                self.max_seq_len, self.shuffle, self.sort_by_length, self.max_workers, self.kind
             )
         )
         self.data_loader.daemon = True
         self.data_loader.start()
 
     @staticmethod
-    def load_data(source, data_buffer, batch_size, prefetch_batches, max_seq_len, shuffle, sort_by_length):
-        max_workers = 8
+    def load_data(
+        source, data_buffer, batch_size, prefetch_batches,
+        max_seq_len, shuffle, sort_by_length, max_workers, kind
+    ):
         exectuor = ThreadPoolExecutor(max_workers=max_workers)
         source = open(source, 'rb')
         buffer_size = batch_size * prefetch_batches
         processor = partial(
             process_data,
-            max_seq_len=max_seq_len, shuffle=shuffle, sort_by_length=sort_by_length
+            max_seq_len=max_seq_len, shuffle=shuffle, sort_by_length=sort_by_length, kind=kind
         )
         while True:
             if data_buffer.qsize() >= prefetch_batches * max_workers:

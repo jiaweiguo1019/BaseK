@@ -1,6 +1,7 @@
 import os
 import pickle as pkl
 from time import localtime, strftime, time
+from tqdm import tqdm
 
 import faiss
 from basek.utils.imports import numpy as np
@@ -23,8 +24,7 @@ ITEM_EMB_DIM = 32
 CATE_EMB_DIM = 16
 EPOCHS = args.epochs
 BATCH_SIZE = 1024
-MATCH_NUMS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200, 250, 300]
-MAX_MATCH_NUM = 300
+MATCH_POINTS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200, 250, 300]
 
 
 if __name__ == '__main__':
@@ -33,6 +33,8 @@ if __name__ == '__main__':
     np.random.seed(seed)
     tf.set_random_seed(seed)
     random.seed(seed)
+    MATCH_POINTS = sorted(MATCH_POINTS)
+    MAX_MATCH_POINT = MATCH_POINTS[-1]
 
     sparse_features = ['uid', 'iid', 'cid']
     # meta_path = './datasets/Amazon/meta_Books.json'
@@ -47,8 +49,8 @@ if __name__ == '__main__':
         all_indices = pkl.load(f)
 
     train_file, test_file = data_files
-    train_input = DataLoader(train_file, BATCH_SIZE, SEQ_LEN)
-    val_input = DataLoader(test_file, BATCH_SIZE * 10, SEQ_LEN)
+    train_input = DataLoader(train_file, BATCH_SIZE, SEQ_LEN, kind='train')
+    test_input = DataLoader(test_file, BATCH_SIZE * 10, SEQ_LEN, kind='test')
     user_size = sparse_features_max_idx['uid']
     item_size = sparse_features_max_idx['iid']
     cate_size = sparse_features_max_idx['cid']
@@ -120,14 +122,14 @@ if __name__ == '__main__':
         name='mask'
     )(hist_seq_len)
     hist_seq_len_for_avg_pooling = Lambda(
-        lambda x: tf.reduce_sum(x, axis=1, keepdims=True) + 1e-16, name='hist_seq_len_for_avg_pooling'
+        lambda x: tf.reduce_sum(x, axis=1, keepdims=True), name='hist_seq_len_for_avg_pooling'
     )(mask)
     mask_layer = Lambda(
         lambda x: tf.reduce_sum(x[0] * x[1], axis=1, keepdims=True),
         name='mask_layer'
     )
     average_pooling_layer = Lambda(
-        lambda x: x[0] / x[1],
+        lambda x: x[0] / (x[1] + 1e-16),
         name='average_pooling_layer'
     )
     sum_pooling_layer = Lambda(
@@ -218,17 +220,16 @@ if __name__ == '__main__':
     with tf.Session(config=config) as sess:
         sess.run(tf.initializers.global_variables())
 
-        best_val_loss = float('inf')
         prev_time = time()
-
         for epoch in range(EPOCHS):
             total_loss = 0.0
             model.save_weights(ckpt_path + f'/{epoch}')
             batch_num = 0
             for train_data in train_input:
                 batch_num += 1
-                uid_, iid_, cid_, label_, hist_iid_seq_, hist_cid_seq_, \
-                    hist_seq_len_, rating_, sample_weight_ = train_data
+                uid_, iid_, cid_, rating_, label_, \
+                    hist_iid_seq_, hist_cid_seq_, hist_rating_seq_, hist_seq_len_, \
+                    sample_weight_ = train_data
                 batch_loss, _ = sess.run(
                     [
                         loss, train_op
@@ -252,33 +253,29 @@ if __name__ == '__main__':
             total_samples = 0
             val_all_item_out = sess.run(all_item_out)
             index.reset()
+            # faiss.normalize_L2(val_all_item_out)
             index.add(val_all_item_out)
-            hits, ndcgs = [[] for _ in range(len(MATCH_NUMS))], [[] for _ in range(len(MATCH_NUMS))]
-            for val_data in val_input:
-                uid_, iid_, cid_, label_, hist_iid_seq_, hist_cid_seq_, \
-                    hist_seq_len_, rating_, sample_weight_ = val_data
-                batch_loss, val_user_out = sess.run(
-                    [loss, user_out],
+            hits, ndcgs = [[] for _ in range(len(0.036865))], [[] for _ in range(len(MATCH_NUMS))]
+            for test_data, ground_truth in tqdm(test_input):
+                uid_, hist_iid_seq_, hist_cid_seq_, hist_rating_seq_, hist_seq_len_ = test_data
+                val_user_out = sess.run(
+                    user_out,
                     feed_dict={
-                        uid: uid_, iid: iid_, cid: cid_,
+                        uid: uid_,
                         hist_iid_seq: hist_iid_seq_,
                         hist_cid_seq: hist_cid_seq_,
                         hist_seq_len: hist_seq_len_
                     }
                 )
-                print('\r' + '-' * 42 + f'  batch_loss: {batch_loss:.8f}  ' + '-' * 42, end='')
-                num_batch_sample = len(uid_)
-                total_loss += batch_loss * num_batch_sample
-                total_samples += num_batch_sample
-                _, I = index.search(np.ascontiguousarray(val_user_out), MAX_MATCH_NUM)
-                batch_hits, batch_ndcgs = compute_metrics(I, MATCH_NUMS, uid_, iid_)
+
+                _, I = index.search(np.ascontiguousarray(val_user_out), MAX_MATCH_POINT)
+                batch_hits, batch_ndcgs = compute_metrics(I, MATCH_POINTS, ground_truth)
                 for idx, (hit_i, ndcg_i) in enumerate(zip(hits, ndcgs)):
                     hit_i.extend(batch_hits[idx])
                     ndcg_i.extend(batch_ndcgs[idx])
-            val_loss = total_loss / total_samples
-            print(f'\nval_loss  of  epoch-{epoch + 1}: {val_loss:.8f}    ' + '-' * 72)
+
             # faiss.normalize_L2(val_user_out)
-            # faiss.normalize_L2(val_all_item_out)
+
             for idx, (hit_i, ndcg_i) in enumerate(zip(hits, ndcgs)):
                 mean_hr = np.mean(hit_i)
                 mean_ndcg = np.mean(ndcg_i)

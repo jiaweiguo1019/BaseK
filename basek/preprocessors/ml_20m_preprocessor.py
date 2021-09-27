@@ -172,7 +172,7 @@ def read_reviews(
     uid_hist_iid_seq = defaultdict(list)
     uid_hist_cid_seq = defaultdict(list)
     true_train_samples, neg_train_samples, test_samples = 0, 0, 0
-    with open(train_path, 'ab') as f_train, open(test_path, 'ab') as f_test:
+    with open(train_path, 'wb') as f_train, open(test_path, 'wb') as f_test:
         print('-' * 32 + '    writing samples    ' + '-' * 32)
         for row in tqdm(converted_dataset_df.itertuples()):
             _, uid, iid, cid, rating = row
@@ -188,7 +188,7 @@ def read_reviews(
                 true_train_samples += 1
             hist_iid_seq = uid_hist_cid_seq[uid]
             hist_cid_seq = uid_hist_cid_seq[uid]
-            uid_hist_iid_seq[iid] = hist_iid_seq + [iid]
+            uid_hist_iid_seq[uid] = hist_iid_seq + [iid]
             uid_hist_cid_seq[uid] = hist_cid_seq + [cid]
             train_sample = (
                 uid, iid, cid, pos_label,

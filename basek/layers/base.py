@@ -13,13 +13,13 @@ Input = keras.layers.Input
 
 class BiasAdd(Layer):
 
-    def __init__(self, dim, **kwargs):
-        self.dim = dim
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     def build(self, input_shape):
+        dim = input_shape[-1]
         self.bias = self.add_weight(
-            shape=[self.dim], initializer=keras.initializers.Zeros(), name="bias"
+            shape=[dim], initializer=keras.initializers.Zeros(), name="bias"
         )
         super().build(input_shape)
 

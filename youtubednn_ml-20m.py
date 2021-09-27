@@ -75,17 +75,17 @@ if __name__ == '__main__':
 
     uid_emb_layer = Embedding(
         user_size, EMB_DIM, mask_zero=True,
-        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        embeddings_initializer=keras.initializers.he_uniform(),
         name='uid_emb_layer'
     )
     iid_emb_layer = Embedding(
         item_size, EMB_DIM, mask_zero=True,
-        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        embeddings_initializer=keras.initializers.he_uniform(),
         name='iid_emb_layer'
     )
     cid_emb_layer = Embedding(
         cate_size, EMB_DIM, mask_zero=True,
-        embeddings_initializer=keras.initializers.TruncatedNormal(),
+        embeddings_initializer=keras.initializers.he_uniform(),
         name='cid_emb_layer'
     )
 
@@ -121,14 +121,15 @@ if __name__ == '__main__':
         axis=-1,
         name='concatenated_all_embs'
     )([uid_emb, hist_iid_seq_emb, hist_cid_seq_emb])
-    all_embs = Flatten(name='flattened_all_embs')(concatenated_all_embs)
+    all_embs = Flatten(name='all_embs')(concatenated_all_embs)
 
     user_hidden_1 = Dense(1024, 'relu', name='user_hidden_1')(all_embs)
     user_hidden_2 = Dense(512, 'relu', name='user_hidden_2')(user_hidden_1)
     user_hidden_3 = Dense(256, 'relu', name='user_hidden_3')(user_hidden_2)
-    user_out = Dense(EMB_DIM, name='user_out')(user_hidden_3)
+    user_out = Dense(EMB_DIM + EMB_DIM, name='user_out')(user_hidden_3)
 
-    item_out = Flatten(name='item_out')(iid_emb + cid_emb)
+    concatenated_item_out = Concatenate(axis=-1, name='concatenated_item_out')([iid_emb, cid_emb])
+    item_out = Flatten(name='item_out')(concatenated_item_out)
 
     model = keras.Model(
         inputs=[uid, iid, cid, hist_iid_seq, hist_cid_seq, hist_seq_len],
@@ -142,11 +143,13 @@ if __name__ == '__main__':
         Index(all_iid_index, name='all_iid_index'), Index(all_cid_index, name='all_cid_index')
     all_iid_emb = iid_emb_layer(all_iid_index())
     all_cid_emb = cid_emb_layer(all_cid_index())
-    all_item_out = Flatten()(all_iid_emb + all_cid_emb)
+    concatenated_all_item_out = Concatenate(axis=-1)([all_iid_emb, all_cid_emb])
+    all_item_out = Flatten(name='all_item_out')(concatenated_all_item_out)
+
     res = faiss.StandardGpuResources()
     flat_config = faiss.GpuIndexFlatConfig()
     flat_config.device = 0
-    index = faiss.GpuIndexFlatL2(res, EMB_DIM, flat_config)
+    index = faiss.GpuIndexFlatL2(res, EMB_DIM + EMB_DIM, flat_config)
 
     # definde loss and train_op
     bias = tf.get_variable(name='bias', shape=[item_size], initializer=tf.initializers.zeros(), trainable=False)

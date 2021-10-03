@@ -17,7 +17,7 @@ def read_raw_dataset(review_path, item_to_cate_path, raw_dataset_path):
     if os.path.exists(item_to_cate_path) and os.path.exists(raw_dataset_path):
         item_to_cate = pd.read_pickle(item_to_cate_path)
         raw_dataset_df = pd.read_pickle(raw_dataset_path)
-        print('read_review finished !')
+        print('read_review finished!')
         return item_to_cate, raw_dataset_df
 
     raw_dataset_df = pd.read_csv(review_path, names=['user', 'item', 'cate', 'behavior', 'timestamp'])
@@ -154,23 +154,25 @@ def read_reviews(
     neg_samples=None,
     test_drop_hist=None
 ):
-    file_prefix = f'seq_len_{seq_len}'
+    file_prefix = ''
     if first_lines:
-        file_prefix = f'{file_prefix}-first_{first_lines}_lines'
+        file_prefix = f'{file_prefix}-first_lines_{first_lines}'
     if drop_dups:
         file_prefix = f'{file_prefix}-drop_dups'
     if only_click:
         file_prefix = f'{file_prefix}-only_click'
     if k_core:
-        file_prefix = f'{file_prefix}-{k_core}_core'
+        file_prefix = f'{file_prefix}-k_core_{k_core}'
     if min_seq_len:
         file_prefix = f'{file_prefix}-min_seq_len_{min_seq_len}'
     if id_ordered_by_count:
         file_prefix = f'{file_prefix}-id_ordered_by_count'
     if neg_samples:
-        file_prefix = f'{file_prefix}-{neg_samples}_neg_samples'
+        file_prefix = f'{file_prefix}-neg_samples_{neg_samples}'
     if test_drop_hist:
         file_prefix = f'{file_prefix}-test_drop_hist'
+    if file_prefix.startswith('-'):
+        file_prefix = file_prefix[1:]
 
     abspath = os.path.abspath(review_path)
     dirpath = os.path.split(abspath)[0]
@@ -187,15 +189,19 @@ def read_reviews(
     converted_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-converted_dataset_df.pkl')
     train_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-train_dataset_df.pkl')
     test_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-test_dataset_df.pkl')
-    train_records_path = os.path.join(dirpath, f'{file_prefix}-train.tfrecords')
-    test_records_path = os.path.join(dirpath, f'{file_prefix}-test.tfrecords')
+    train_records_path = os.path.join(dirpath, f'seq_len_{seq_len}-{file_prefix}-train.tfrecords')
+    test_records_path = os.path.join(dirpath, f'seq_len_{seq_len}-{file_prefix}-test.tfrecords')
 
     return_str = '#' * 128 + '\n' + \
         'data_files:\n' + \
-        f'\ttrain_records_path: {train_records_path}\n' + \
-        f'\ttest_records_path: {test_records_path}\n' + \
-        f'sparse_features_max_idx_path: {sparse_features_max_idx_path}\n' + \
-        f'all_indices_path: {all_indices_path}\n' + \
+        '\ttrain_records_path:\n' + \
+        f'\t\t{train_records_path}\n' + \
+        '\test_records_path:\n' + \
+        f'\t\t{test_records_path}\n' + \
+        'sparse_features_max_idx_path:\n' + \
+        f'\t{sparse_features_max_idx_path}\n' + \
+        'all_indices_path:\n' + \
+        f'\t{all_indices_path}\n' + \
         '#' * 128
 
     if not from_raw:
@@ -278,8 +284,6 @@ def read_reviews(
     train_dataset_df.to_pickle(train_dataset_df_path)
     test_dataset_df.to_pickle(test_dataset_df_path)
 
-    print(return_str)
-
     p_train_writer = Process(
         target=train_writer,
         args=(
@@ -320,7 +324,7 @@ def train_writer(
 
     print('=' * 32 + '    writing training samples    ' + '=' * 32)
     uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_seq, uid_hist_sample_tempature_seq = \
-         {}, {}, {}, {}, {}
+        {}, {}, {}, {}, {}
 
     for uid, uid_hist in train_dataset_df.groupby('uid'):
         uid_hist_iid_seq[uid] = np.array(uid_hist['iid'].to_list())

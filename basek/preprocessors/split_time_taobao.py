@@ -327,7 +327,7 @@ def train_writer(
     iid_to_cid = pd.read_pickle(iid_to_cid_path)
     bid_sample_tempature = pd.read_pickle(bid_sample_tempature_path)
 
-    pad_func = partial(_left_pad, seq_len)
+    pad_func = partial(_left_pad, seq_len=seq_len)
 
     print('=' * 32 + '    writing training samples    ' + '=' * 32)
     uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_seq, uid_hist_sample_tempature_seq = \
@@ -351,8 +351,8 @@ def train_writer(
             hist_cid_seq = uid_hist_cid_seq[uid][:hist_seq_len]
             hist_bid_seq = uid_hist_bid_seq[uid][:hist_seq_len]
             hist_ts_seq = uid_hist_ts_seq[uid][:hist_seq_len]
-            hist_ts_diff = (timestamp - hist_ts_seq) / 3600
-            hist_ts_diff = hist_ts_diff.astype(np.int64)
+            hist_ts_diff_seq = (timestamp - hist_ts_seq) / 3600
+            hist_ts_diff_seq = hist_ts_diff_seq.astype(np.int64)
 
             neg_candidate_list = list(set(range(iid_size)) - set([iid]))
             neg_iid_list = np.random.choice(neg_candidate_list, neg_samples, replace=False)
@@ -365,20 +365,23 @@ def train_writer(
 
             sample_len = int(min(seq_len, hist_seq_len * 0.9))
             if not sample_len:
-                sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff = [], [], [], []
+                sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq = (
+                    np.array([], dtype=np.int64) for _ in range(4)
+                )
             else:
-                sample_idx = np.random.choice(hist_seq_len, sample_len, replace=False, p=sample_prob).sort()
+                sample_idx = np.random.choice(hist_seq_len, sample_len, replace=False, p=sample_prob)
+                sample_idx.sort()
                 sample_iid_seq = np.array(hist_iid_seq)[sample_idx]
                 sample_cid_seq = np.array(hist_cid_seq)[sample_idx]
                 sample_bid_seq = np.array(hist_bid_seq)[sample_idx]
-                sample_ts_diff = hist_ts_diff[sample_idx]
+                sample_ts_diff_seq = hist_ts_diff_seq[sample_idx]
 
             train_example = _build_train_example(
-                uid, iid, cid, neg_iid_list, neg_cid_list, bid, timestamp,
-                pad_func(hist_iid_seq), pad_func(hist_cid_seq), pad_func(hist_bid_seq), pad_func(hist_ts_diff),
+                uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
+                pad_func(hist_iid_seq), pad_func(hist_cid_seq), pad_func(hist_bid_seq), pad_func(hist_ts_diff_seq),
                 min(hist_seq_len, seq_len),
-                pad_func(sample_iid_seq), pad_func(sample_cid_seq), pad_func(sample_bid_seq), pad_func(sample_ts_diff),
-                min(sample_len, seq_len)
+                pad_func(sample_iid_seq), pad_func(sample_cid_seq), pad_func(sample_bid_seq), pad_func(sample_ts_diff_seq),
+                sample_len
             )
 
             writer.write(train_example.SerializeToString())
@@ -390,17 +393,18 @@ def train_writer(
 
 
 def _build_train_example(
-    uid, iid, cid, bid, neg_iid_list, neg_cid_list,
+    uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
     hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
-    sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff, sample_len
+    sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq, sample_len
 ):
     feature = {
         'uid': tf.train.Feature(int64_list=tf.train.Int64List(value=[uid])),
         'iid': tf.train.Feature(int64_list=tf.train.Int64List(value=[iid])),
         'neg_iid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_iid_list)),
-        'neg_cid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
         'cid': tf.train.Feature(int64_list=tf.train.Int64List(value=[cid])),
+        'neg_cid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
         'bid': tf.train.Feature(int64_list=tf.train.Int64List(value=[bid])),
+        'timestamp': tf.train.Feature(int64_list=tf.train.Int64List(value=[timestamp])),
         'hist_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_iid_seq)),
         'hist_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_cid_seq)),
         'hist_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_bid_seq)),
@@ -409,7 +413,7 @@ def _build_train_example(
         'sample_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_iid_seq)),
         'sample_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_cid_seq)),
         'sample_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_bid_seq)),
-        'sample_ts_diff': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_ts_diff)),
+        'sample_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_ts_diff_seq)),
         'sample_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[sample_len])),
     }
     example = tf.train.Example(features=tf.train.Features(feature=feature))
@@ -424,7 +428,7 @@ def test_writer(
     train_dataset_df = pd.read_pickle(train_dataset_df_path)
     test_dataset_df = pd.read_pickle(test_dataset_df_path)
     iid_to_cid = pd.read_pickle(iid_to_cid_path)
-    pad_func = partial(_left_pad, seq_len)
+    pad_func = partial(_left_pad, seq_len=seq_len)
 
     print('=' * 32 + '    writing testing samples    ' + '=' * 32)
     uid_hist_iid_seq, uid_unseen_iid_list, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_diff_seq, uid_hist_len = \

@@ -333,6 +333,7 @@ def train_writer(
     uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_seq, uid_hist_sample_tempature_seq = \
         {}, {}, {}, {}, {}
 
+    diff = defaultdict(list)
     for uid, uid_hist in train_dataset_df.groupby('uid'):
         uid_hist_iid_seq[uid] = np.array(uid_hist['iid'].to_list())
         uid_hist_cid_seq[uid] = np.array(uid_hist['cid'].to_list())
@@ -345,7 +346,14 @@ def train_writer(
     with tf.io.TFRecordWriter(train_records_path) as writer:
         curr_uid_count = defaultdict(int)
         for idx, row in tqdm(enumerate(train_dataset_df.itertuples())):
+            a = time.time()
+
+
             _, uid, iid, cid, bid, timestamp = row
+            b = time.time()
+
+
+
             hist_seq_len = curr_uid_count[uid]
             hist_iid_seq = uid_hist_iid_seq[uid][:hist_seq_len]
             hist_cid_seq = uid_hist_cid_seq[uid][:hist_seq_len]
@@ -353,15 +361,19 @@ def train_writer(
             hist_ts_seq = uid_hist_ts_seq[uid][:hist_seq_len]
             hist_ts_diff_seq = (timestamp - hist_ts_seq) / 3600
             hist_ts_diff_seq = hist_ts_diff_seq.astype(np.int64)
+            c = time.time()
+
 
             neg_candidate_list = list(set(range(iid_size)) - set([iid]))
             neg_iid_list = np.random.choice(neg_candidate_list, neg_samples, replace=False)
             neg_cid_list = np.array(iid_to_cid[neg_iid_list])
+            d = time.time()
 
             hist_sample_tempature_seq = uid_hist_sample_tempature_seq[uid][:hist_seq_len]
             position_tempature_seq = np.arange(hist_seq_len) * 0.005
             total_sample_tempature_seq = hist_sample_tempature_seq + position_tempature_seq
             sample_prob = total_sample_tempature_seq / np.sum(total_sample_tempature_seq)
+            e = time.time()
 
             sample_len = int(min(seq_len, hist_seq_len * 0.9))
             if not sample_len:
@@ -375,19 +387,54 @@ def train_writer(
                 sample_cid_seq = np.array(hist_cid_seq)[sample_idx]
                 sample_bid_seq = np.array(hist_bid_seq)[sample_idx]
                 sample_ts_diff_seq = hist_ts_diff_seq[sample_idx]
+            hist_iid_seq = pad_func(hist_iid_seq)
+            hist_cid_seq = pad_func(hist_cid_seq)
+            hist_bid_seq = pad_func(hist_bid_seq)
+            hist_ts_diff_seq = pad_func(hist_ts_diff_seq)
+            hist_seq_len = min(hist_seq_len, seq_len)
+            sample_iid_seq = pad_func(sample_iid_seq)
+            sample_cid_seq = pad_func(sample_cid_seq)
+            sample_bid_seq = pad_func(sample_bid_seq)
+            sample_ts_diff_seq = pad_func(sample_ts_diff_seq)
+            f = time.time()
 
+
+
+
+            # train_example = _build_train_example(
+            #     uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
+            #     pad_func(hist_iid_seq), pad_func(hist_cid_seq), pad_func(hist_bid_seq), pad_func(hist_ts_diff_seq),
+            #     min(hist_seq_len, seq_len),
+            #     pad_func(sample_iid_seq), pad_func(sample_cid_seq), pad_func(sample_bid_seq), pad_func(sample_ts_diff_seq),
+            #     sample_len
+            # )
             train_example = _build_train_example(
                 uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
-                pad_func(hist_iid_seq), pad_func(hist_cid_seq), pad_func(hist_bid_seq), pad_func(hist_ts_diff_seq),
-                min(hist_seq_len, seq_len),
-                pad_func(sample_iid_seq), pad_func(sample_cid_seq), pad_func(sample_bid_seq), pad_func(sample_ts_diff_seq),
+                hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq,
+                hist_seq_len,
+                sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq,
                 sample_len
             )
+            g = time.time()
 
+            diff[1].append(b - a)
+            diff[2].append(c - b)
+            diff[3].append(d - c)
+            diff[4].append(e - d)
+            diff[5].append(f - e)
+            diff[6].append(g - f)
             writer.write(train_example.SerializeToString())
             total_train_samples += 1
             curr_uid_count[uid] += 1
             if idx % 1000 == 0:
+                print(
+                    str(sum(diff[1])) + '\n',
+                    str(sum(diff[2])) + '\n',
+                    str(sum(diff[3])) + '\n',
+                    str(sum(diff[4])) + '\n',
+                    str(sum(diff[5])) + '\n',
+                    str(sum(diff[6]))
+                )
                 writer.flush()
     print('=' * 32 + '    writing training samples finished, {total_train_samples} total train samples   ' + '=' * 32)
 

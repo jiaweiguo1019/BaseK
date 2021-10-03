@@ -346,12 +346,7 @@ def train_writer(
     with tf.io.TFRecordWriter(train_records_path) as writer:
         curr_uid_count = defaultdict(int)
         for idx, row in tqdm(enumerate(train_dataset_df.itertuples())):
-            a = time.time()
-
-
             _, uid, iid, cid, bid, timestamp = row
-            b = time.time()
-
 
 
             hist_seq_len = curr_uid_count[uid]
@@ -361,19 +356,24 @@ def train_writer(
             hist_ts_seq = uid_hist_ts_seq[uid][:hist_seq_len]
             hist_ts_diff_seq = (timestamp - hist_ts_seq) / 3600
             hist_ts_diff_seq = hist_ts_diff_seq.astype(np.int64)
+            a = time.time()
+            b = time.time()
+
+
+            neg_candidate_list = np.array(list(set(range(iid_size)) - set([iid])))
             c = time.time()
-
-
-            neg_candidate_list = list(set(range(iid_size)) - set([iid]))
-            neg_iid_list = np.random.choice(neg_candidate_list, neg_samples, replace=False)
-            neg_cid_list = np.array(iid_to_cid[neg_iid_list])
+            neg_iid_list = np.random.choice(neg_candidate_list, neg_samples, replace=True)
             d = time.time()
+            neg_cid_list = np.array(iid_to_cid[neg_iid_list])
+            e = time.time()
+
+
 
             hist_sample_tempature_seq = uid_hist_sample_tempature_seq[uid][:hist_seq_len]
             position_tempature_seq = np.arange(hist_seq_len) * 0.005
             total_sample_tempature_seq = hist_sample_tempature_seq + position_tempature_seq
             sample_prob = total_sample_tempature_seq / np.sum(total_sample_tempature_seq)
-            e = time.time()
+            f = time.time()
 
             sample_len = int(min(seq_len, hist_seq_len * 0.9))
             if not sample_len:
@@ -387,27 +387,22 @@ def train_writer(
                 sample_cid_seq = np.array(hist_cid_seq)[sample_idx]
                 sample_bid_seq = np.array(hist_bid_seq)[sample_idx]
                 sample_ts_diff_seq = hist_ts_diff_seq[sample_idx]
-            hist_iid_seq = pad_func(hist_iid_seq)
-            hist_cid_seq = pad_func(hist_cid_seq)
-            hist_bid_seq = pad_func(hist_bid_seq)
-            hist_ts_diff_seq = pad_func(hist_ts_diff_seq)
+            g = time.time()
+
+            h = time.time()
+
+            i = time.time()
+
+
+            train_hist_iid_seq = _left_pad(hist_iid_seq, seq_len)
+            hist_cid_seq = _left_pad(hist_cid_seq, seq_len)
+            hist_bid_seq = _left_pad(hist_bid_seq, seq_len)
+            hist_ts_diff_seq = _left_pad(hist_ts_diff_seq, seq_len)
             hist_seq_len = min(hist_seq_len, seq_len)
-            sample_iid_seq = pad_func(sample_iid_seq)
-            sample_cid_seq = pad_func(sample_cid_seq)
-            sample_bid_seq = pad_func(sample_bid_seq)
-            sample_ts_diff_seq = pad_func(sample_ts_diff_seq)
-            f = time.time()
-
-
-
-
-            # train_example = _build_train_example(
-            #     uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
-            #     pad_func(hist_iid_seq), pad_func(hist_cid_seq), pad_func(hist_bid_seq), pad_func(hist_ts_diff_seq),
-            #     min(hist_seq_len, seq_len),
-            #     pad_func(sample_iid_seq), pad_func(sample_cid_seq), pad_func(sample_bid_seq), pad_func(sample_ts_diff_seq),
-            #     sample_len
-            # )
+            sample_iid_seq = _left_pad(sample_iid_seq, seq_len)
+            sample_cid_seq = _left_pad(sample_cid_seq, seq_len)
+            sample_bid_seq = _left_pad(sample_bid_seq, seq_len)
+            sample_ts_diff_seq = _left_pad(sample_ts_diff_seq, seq_len)
             train_example = _build_train_example(
                 uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
                 hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq,
@@ -415,7 +410,8 @@ def train_writer(
                 sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq,
                 sample_len
             )
-            g = time.time()
+            j = time.time()
+
 
             diff[1].append(b - a)
             diff[2].append(c - b)
@@ -423,17 +419,24 @@ def train_writer(
             diff[4].append(e - d)
             diff[5].append(f - e)
             diff[6].append(g - f)
+            diff[7].append(h - g)
+            diff[8].append(i - h)
+            diff[9].append(j - i)
+
             writer.write(train_example.SerializeToString())
             total_train_samples += 1
             curr_uid_count[uid] += 1
             if idx % 1000 == 0:
                 print(
-                    str(sum(diff[1])) + '\n',
-                    str(sum(diff[2])) + '\n',
-                    str(sum(diff[3])) + '\n',
-                    str(sum(diff[4])) + '\n',
-                    str(sum(diff[5])) + '\n',
-                    str(sum(diff[6]))
+                    '1 ' + str(sum(diff[1])) + '\n'
+                    + '2 ' + str(sum(diff[2])) + '\n'
+                    + '3 ' + str(sum(diff[3])) + '\n'
+                    + '4 ' + str(sum(diff[4])) + '\n'
+                    + '5 ' + str(sum(diff[5])) + '\n'
+                    + '6 ' + str(sum(diff[6])) + '\n'
+                    + '7 ' + str(sum(diff[7])) + '\n'
+                    + '8 ' + str(sum(diff[8])) + '\n'
+                    + '9 ' + str(sum(diff[9]))
                 )
                 writer.flush()
     print('=' * 32 + '    writing training samples finished, {total_train_samples} total train samples   ' + '=' * 32)

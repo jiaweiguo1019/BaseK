@@ -167,10 +167,6 @@ def read_reviews(
         file_prefix = f'{file_prefix}-min_seq_len_{min_seq_len}'
     if id_ordered_by_count:
         file_prefix = f'{file_prefix}-id_ordered_by_count'
-    if neg_samples:
-        file_prefix = f'{file_prefix}-neg_samples_{neg_samples}'
-    if test_drop_hist:
-        file_prefix = f'{file_prefix}-test_drop_hist'
     if file_prefix.startswith('-'):
         file_prefix = file_prefix[1:]
 
@@ -189,15 +185,23 @@ def read_reviews(
     converted_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-converted_dataset_df.pkl')
     train_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-train_dataset_df.pkl')
     test_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-test_dataset_df.pkl')
-    train_records_path = os.path.join(dirpath, f'seq_len_{seq_len}-{file_prefix}-train.tfrecords')
-    test_records_path = os.path.join(dirpath, f'seq_len_{seq_len}-{file_prefix}-test.tfrecords')
+
+    tf_records_prefix = f'seq_len_{seq_len}'
+    if neg_samples:
+        tf_records_prefix = f'{tf_records_prefix}-neg_samples_{neg_samples}'
+    if test_drop_hist:
+        tf_records_prefix = f'{tf_records_prefix}-test_drop_hist'
+    if file_prefix:
+        tf_records_prefix = f'{tf_records_prefix}-{file_prefix}'
+    train_tfrecords_path = os.path.join(dirpath, f'{tf_records_prefix}-train.tfrecords')
+    test_tfrecords_path = os.path.join(dirpath, f'{tf_records_prefix}-test.tfrecords')
 
     return_str = '#' * 128 + '\n' + \
         'data_files:\n' + \
         '\ttrain_records_path:\n' + \
-        f'\t\t{train_records_path}\n' + \
+        f'\t\t{train_tfrecords_path}\n' + \
         '\test_records_path:\n' + \
-        f'\t\t{test_records_path}\n' + \
+        f'\t\t{test_tfrecords_path}\n' + \
         'sparse_features_max_idx_path:\n' + \
         f'\t{sparse_features_max_idx_path}\n' + \
         'all_indices_path:\n' + \
@@ -254,6 +258,9 @@ def read_reviews(
     uid_size, iid_size, cid_size, bid_size = \
         len(uid_to_user), len(iid_to_item), len(cid_to_cate), len(bid_to_behavior)
     sparse_features_max_idx = {'uid': uid_size, 'iid': iid_size, 'cid': cid_size, 'bid': bid_size}
+    print('#' * 128)
+    print('-' * 16 + f'    uid_size: {uid_size}, iid_size: {iid_size}, ' + f'cid_size: {cid_size}    ' + '-' * 16)
+    print('#' * 128)
     with open(sparse_features_max_idx_path, 'wb') as f:
         pkl.dump(sparse_features_max_idx, f)
 
@@ -419,7 +426,7 @@ def test_writer(
     iid_to_cid = pd.read_pickle(iid_to_cid_path)
     pad_func = partial(_left_pad, seq_len)
 
-    print('=' * 64 + '    writing testing samples    ' + '=' * 64)
+    print('=' * 32 + '    writing testing samples    ' + '=' * 32)
     uid_hist_iid_seq, uid_unseen_iid_list, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_diff_seq, uid_hist_len = \
         {}, {}, {}, {}, {}, {}
 

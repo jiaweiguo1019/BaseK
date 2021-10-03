@@ -105,8 +105,8 @@ def build_entity_id_map(
         entity_count = dict(sorted(entity_count.items(), key=lambda x: x[-1], reverse=True))
     else:
         entity_count = dict(entity_count.items())
-    entity_to_id_path = os.path.join(dirpath, f'{file_prefix}_{entity_prefix}_to_{id_prefix}.pkl')
-    id_to_entity_path = os.path.join(dirpath, f'{file_prefix}_{id_prefix}_to_{entity_prefix}.pkl')
+    entity_to_id_path = os.path.join(dirpath, f'{file_prefix}-{entity_prefix}_to_{id_prefix}.pkl')
+    id_to_entity_path = os.path.join(dirpath, f'{file_prefix}-{id_prefix}_to_{entity_prefix}.pkl')
 
     default_count = entity_count.get('default', 0)
     if 'default' in entity_count:
@@ -130,23 +130,27 @@ def read_reviews(
     review_path, seq_len, from_raw=False,
     first_lines=None,
     drop_dups=False, only_click=False, k_core=None,  min_seq_len=None,
-    id_ordered_by_count=False, test_drop_hist=None
+    id_ordered_by_count=False,
+    neg_samples=None,
+    test_drop_hist=None
 ):
     file_prefix = f'seq_len_{seq_len}'
     if first_lines:
-        file_prefix = f'{file_prefix}_first_{first_lines}_lines'
+        file_prefix = f'{file_prefix}-first_{first_lines}_lines'
     if drop_dups:
-        file_prefix = f'{file_prefix}_drop_dups'
+        file_prefix = f'{file_prefix}-drop_dups'
     if only_click:
-        file_prefix = f'{file_prefix}_only_click'
-    if id_ordered_by_count:
-        file_prefix = f'{file_prefix}_id_ordered_by_count'
+        file_prefix = f'{file_prefix}-only_click'
     if k_core:
-        file_prefix = f'{file_prefix}_{k_core}_core'
+        file_prefix = f'{file_prefix}-{k_core}_core'
     if min_seq_len:
-        file_prefix = f'{file_prefix}_min_seq_len_{min_seq_len}'
+        file_prefix = f'{file_prefix}-min_seq_len_{min_seq_len}'
+    if id_ordered_by_count:
+        file_prefix = f'{file_prefix}-id_ordered_by_count'
+    if neg_samples:
+        file_prefix = f'{file_prefix}-{neg_samples}_neg_samples'
     if test_drop_hist:
-        file_prefix = f'{file_prefix}_test_drop_hist'
+        file_prefix = f'{file_prefix}-test_drop_hist'
 
     abspath = os.path.abspath(review_path)
     dirpath = os.path.split(abspath)[0]

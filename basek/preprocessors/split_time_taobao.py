@@ -294,7 +294,7 @@ def read_reviews(
     p_train_writer = Process(
         target=train_writer,
         args=(
-            train_records_path, train_dataset_df_path, iid_to_cid_path, bid_sample_tempature_path,
+            train_tfrecords_path, train_dataset_df_path, iid_to_cid_path, bid_sample_tempature_path,
             seq_len, iid_size, neg_samples
         )
     )
@@ -304,7 +304,7 @@ def read_reviews(
     p_test_writer = Process(
         target=test_writer,
         args=(
-            test_records_path, train_dataset_df_path, test_dataset_df_path, iid_to_cid_path,
+            test_tfrecords_path, train_dataset_df_path, test_dataset_df_path, iid_to_cid_path,
             split_ts, seq_len, iid_size, neg_samples, test_drop_hist
         )
     )

@@ -18,8 +18,7 @@ from basek.layers.base import BiasAdd, Concatenate, Dense, Embedding, Flatten, I
 from basek.utils.compute_metrics import compute_metrics
 
 
-SEQ_LEN = 100
-VALIDATION_SPLIT_RATIO = 0.1
+SEQ_LEN = 50
 NEG_SAMPLES = 1024
 USER_EMB_DIM = 64
 ITEM_EMB_DIM = 64
@@ -37,17 +36,19 @@ def train_parser(serialized_example):
             'iid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
             'cid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
             'bid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
-            'hist_iid_seq': tf.io.VarLenFeature(dtype=tf.int64),
-            'hist_cid_seq': tf.io.VarLenFeature(dtype=tf.int64),
-            'hist_bid_seq': tf.io.VarLenFeature(dtype=tf.int64),
+            'timestamp': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
+            'hist_iid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'hist_cid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'hist_bid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'hist_ts_diff_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
             'hist_seq_len': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
-
-
+            'sample_iid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'sample_cid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'sample_bid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'sample_ts_diff_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'sample_len': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
         }
     )
-    features['hist_iid_seq'] = tf.sparse_tensor_to_dense(features['hist_iid_seq'])
-    features['hist_cid_seq'] = tf.sparse_tensor_to_dense(features['hist_cid_seq'])
-    features['hist_bid_seq'] = tf.sparse_tensor_to_dense(features['hist_bid_seq'])
     return features
 
 
@@ -56,31 +57,38 @@ def test_parser(serialized_example):
         serialized_example,
         features={
             'uid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
-            'hist_iid_seq': tf.io.VarLenFeature(dtype=tf.int64),
-            'hist_cid_seq': tf.io.VarLenFeature(dtype=tf.int64),
-            'hist_bid_seq': tf.io.VarLenFeature(dtype=tf.int64),
+            'hist_iid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'hist_cid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'hist_bid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'hist_ts_diff_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
             'hist_seq_len': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
             'ground_truth_iid_seq': tf.io.VarLenFeature(dtype=tf.int64),
             'ground_truth_cid_seq': tf.io.VarLenFeature(dtype=tf.int64),
             'ground_truth_bid_seq': tf.io.VarLenFeature(dtype=tf.int64),
+            'ground_truth_ts_seq': tf.io.VarLenFeature(dtype=tf.int64),
             'ground_truth_seq_len': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
+            'all_hist_iid_seq': tf.io.VarLenFeature(dtype=tf.int64),
+            'all_hist_cid_seq': tf.io.VarLenFeature(dtype=tf.int64),
+            'all_hist_bid_seq': tf.io.VarLenFeature(dtype=tf.int64),
+            'all_hist_ts_diff_seq': tf.io.VarLenFeature(dtype=tf.int64),
+            'all_hist_seq_len': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
         }
     )
-    features['hist_iid_seq'] = tf.sparse_tensor_to_dense(features['hist_iid_seq'])
-    features['hist_cid_seq'] = tf.sparse_tensor_to_dense(features['hist_cid_seq'])
-    features['hist_bid_seq'] = tf.sparse_tensor_to_dense(features['hist_bid_seq'])
+
     features['ground_truth_iid_seq'] = tf.sparse_tensor_to_dense(features['ground_truth_iid_seq'])
     features['ground_truth_cid_seq'] = tf.sparse_tensor_to_dense(features['ground_truth_cid_seq'])
     features['ground_truth_bid_seq'] = tf.sparse_tensor_to_dense(features['ground_truth_bid_seq'])
+    features['ground_truth_ts_seq'] = tf.sparse_tensor_to_dense(features['ground_truth_ts_seq'])
+    features['all_hist_iid_seq'] = tf.sparse_tensor_to_dense(features['all_hist_iid_seq'])
+    features['all_hist_cid_seq'] = tf.sparse_tensor_to_dense(features['all_hist_cid_seq'])
+    features['all_hist_bid_seq'] = tf.sparse_tensor_to_dense(features['all_hist_bid_seq'])
+    features['all_hist_ts_diff_seq'] = tf.sparse_tensor_to_dense(features['all_hist_ts_diff_seq'])
     return features
 
 
 if __name__ == '__main__':
 
     seed = args.seed
-    from_raw = args.from_raw
-    only_click = args.only_click
-    k_core = args.k_core
     np.random.seed(seed)
     tf.set_random_seed(seed)
     random.seed(seed)
@@ -89,11 +97,13 @@ if __name__ == '__main__':
 
     sparse_features = ['uid', 'iid', 'cid']
 
-    review_path = './datasets/Taobao/UserBehavior.csv'
-    data_files, sparse_features_max_idx_path, all_indices_path = \
-        read_reviews(review_path, from_raw=from_raw, only_click=only_click, k_core=k_core)
+    sparse_features_max_idx_path = \
+        '/home/web_server/guojiawei/basek/datasets/Taobao/k_core_20-id_ordered_by_count-sparse_features_max_idx.pkl'
+    all_indices_path = \
+        '/home/web_server/guojiawei/basek/datasets/Taobao/k_core_20-id_ordered_by_count-all_indices.pkl'
 
-    train_file, test_file = data_files
+    train_file = '/data/project/tfrecords/seq_len_50-k_core_20-id_ordered_by_count-train.tfrecords'
+    test_file = '/data/project/tfrecords/seq_len_50-test_drop_hist-k_core_20-id_ordered_by_count-test.tfrecords'
 
     train_dataset = tf.data.TFRecordDataset(train_file)
     train_dataset = train_dataset.map(train_parser, num_parallel_calls=-1)
@@ -104,7 +114,7 @@ if __name__ == '__main__':
 
     test_dataset = tf.data.TFRecordDataset(test_file)
     test_dataset = test_dataset.map(test_parser, num_parallel_calls=-1)
-    test_dataset = test_dataset.padded_batch(10 * BATCH_SIZE).prefetch(10)
+    test_dataset = test_dataset.padded_batch(16 * BATCH_SIZE).prefetch(10)
     test_iterator = tf.data.make_initializable_iterator(test_dataset)
     test_batch = test_iterator.get_next()
 
@@ -144,6 +154,7 @@ if __name__ == '__main__':
     test_hist_cid_seq = test_batch['hist_cid_seq']
     test_hist_seq_len = test_batch['hist_seq_len']
     test_ground_truth_iid_seq = test_batch['ground_truth_iid_seq']
+    all_hist_iid_seq = test_batch['all_hist_iid_seq']
     # test_ground_truth_seq_len = test_batch['ground_truth_seq_len']
 
     uid_emb_layer = Embedding(
@@ -162,13 +173,9 @@ if __name__ == '__main__':
         name='cid_emb_layer'
     )
 
-    hist_seq_cutoff_len_layer = Lambda(
-        lambda x: tf.minimum(tf.reduce_max(x), SEQ_LEN),
-        name='hist_seq_cutoff_len_layer'
-    )
     create_mask_layer = Lambda(
         lambda x: tf.transpose(
-            tf.sequence_mask(x[0], x[1], dtype=tf.float32),
+            tf.sequence_mask(x, SEQ_LEN, dtype=tf.float32),
             [0, 2, 1]
         ),
         name='create_mask_layer'
@@ -193,13 +200,10 @@ if __name__ == '__main__':
 
     def _user_all_embs(uid, hist_iid_seq, hist_cid_seq, hist_seq_len):
         uid_emb = uid_emb_layer(uid)
-        hist_iid_seq = hist_iid_seq[:, :50]
         hist_iid_seq_emb = iid_emb_layer(hist_iid_seq)
-        hist_cid_seq = hist_cid_seq[:, :50]
         hist_cid_seq_emb = cid_emb_layer(hist_cid_seq)
-        hist_seq_cutoff_len = hist_seq_cutoff_len_layer(hist_seq_len)
 
-        mask = create_mask_layer([hist_seq_len, hist_seq_cutoff_len])
+        mask = create_mask_layer(hist_seq_len)
         masked_hist_seq_len = masked_hist_seq_len_layer(mask)
         masked_hist_iid_seq_emb = mask_layer([hist_iid_seq_emb, mask])
         masked_hist_cid_seq_emb = mask_layer([hist_cid_seq_emb, mask])
@@ -271,7 +275,7 @@ if __name__ == '__main__':
         num_classes=item_size
     )
     loss = tf.reduce_mean(loss)
-    optimizer = tfa.optimizers.AdamW(1e-4)
+    optimizer = tfa.optimizers.AdamW(1e-5, 1e-2)
     model_vars = tf.trainable_variables()
     grads = tf.gradients(loss, model_vars)
     clipped_grads, _ = tf.clip_by_global_norm(grads, 5.0)
@@ -295,8 +299,58 @@ if __name__ == '__main__':
                 try:
                     batch_loss, _ = sess.run([loss, train_op])
                     total_loss += batch_loss
-                    print('\r' + '-' * 42 + f'  batch_loss: {batch_loss:.8f}  ' + '-' * 42, end='')
+                    print('\r' + '-' * 32 + f'  batch: {batch_num}, loss: {batch_loss:.8f}  ' + '-' * 32, end='')
                     batch_num += 1
+
+                    if batch_num % 10000 == 0:
+                        curr_time = time()
+                        time_elapsed = curr_time - prev_time
+                        prev_time = curr_time
+                        print('\n' + '-' * 72 + f'    time elapsed: {time_elapsed:.2f}s')
+                        sess.run(test_iterator.initializer)
+                        all_item_out = sess.run(all_item_embs)
+                        index.reset()
+                        # faiss.normalize_L2(val_all_item_out)
+                        index.add(all_item_out)
+                        metrics = defaultdict(lambda: defaultdict(list))
+                        test_iteration = 0
+                        while True:
+                            try:
+                                user_out, ground_truth_iid_seq, hist_iid_seq = sess.run(
+                                    [test_user_out, test_ground_truth_iid_seq, all_hist_iid_seq]
+                                )
+                                # faiss.normalize_L2(val_user_out)
+                                _, I = index.search(np.ascontiguousarray(user_out), MAX_MATCH_POINT)
+                                batch_metrics = compute_metrics(I, MATCH_POINTS, ground_truth_iid_seq, hist_iid_seq)
+                                for per_metric, per_batch_metric_values in batch_metrics.items():
+                                    for match_point, per_batch_metric_value in per_batch_metric_values.items():
+                                        metrics[per_metric][match_point].append(per_batch_metric_value)
+                                print('\r' + '-' * 32 + f'   test iteration {test_iteration + 1}: finished   ' + '-' * 32, end='')
+                                test_iteration += 1
+                            except tf.errors.OutOfRangeError:
+                                print('\n' + '#' * 128)
+                                aggregated_metrics = defaultdict(dict)
+                                for per_metric, per_metric_values in metrics.items():
+                                    for math_point, per_metric_value in per_metric_values.items():
+                                        aggregated_metrics[per_metric][math_point] = \
+                                            np.mean(np.concatenate(per_metric_value, axis=0))
+                                # print(aggregated_metrics)
+                                for per_metric, per_aggregated_metric_values in aggregated_metrics.items():
+                                    print('=' * 32 + f'        {per_metric}        ' + '=' * 32)
+                                    per_metric_str = ''
+                                    for math_point, per_aggregated_metric_value in per_aggregated_metric_values.items():
+                                        per_metric_str = per_metric_str + '-' + \
+                                            f' @{math_point:3d}: {per_aggregated_metric_value:.10f} ' + '-'
+                                        if len(per_metric_str) > 128:
+                                            print(per_metric_str)
+                                            per_metric_str = ''
+                                    if per_metric_str:
+                                        print(per_metric_str)
+                                curr_time = time()
+                                time_elapsed = curr_time - prev_time
+                                prev_time = curr_time
+                                print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s\n' + '#' * 128)
+                                break
 
                 except tf.errors.OutOfRangeError:
                     curr_time = time()
@@ -317,7 +371,7 @@ if __name__ == '__main__':
             while True:
                 try:
                     user_out, ground_truth_iid_seq, hist_iid_seq = sess.run(
-                        [test_user_out, test_ground_truth_iid_seq, test_hist_iid_seq]
+                        [test_user_out, test_ground_truth_iid_seq, all_hist_iid_seq]
                     )
                     # faiss.normalize_L2(val_user_out)
                     _, I = index.search(np.ascontiguousarray(user_out), MAX_MATCH_POINT)
@@ -349,5 +403,5 @@ if __name__ == '__main__':
                     curr_time = time()
                     time_elapsed = curr_time - prev_time
                     prev_time = curr_time
-                    print('-' * 74 + f'    time elapsed: {time_elapsed:.2f}s\n' + '#' * 128)
+                    print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s\n' + '#' * 128)
                     break

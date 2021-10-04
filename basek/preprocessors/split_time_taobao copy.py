@@ -1,9 +1,9 @@
+from functools import partial
 import os
 import networkx as nx
 import pickle as pkl
 import time
 from collections import defaultdict
-from functools import partial
 from multiprocessing import Process
 
 import pandas as pd
@@ -13,13 +13,11 @@ from basek.utils.tf_compat import tf
 from basek.utils.imports import numpy as np
 
 
-def read_raw_dataset(review_path, item_to_cate_path, raw_dataset_path):
-    if os.path.exists(item_to_cate_path) and os.path.exists(raw_dataset_path):
-        item_to_cate = pd.read_pickle(item_to_cate_path)
-        raw_dataset_df = pd.read_pickle(raw_dataset_path)
-        print('read_review finished!')
-        return item_to_cate, raw_dataset_df
-
+def read_raw_dataset(
+    review_path,
+    item_to_cate_path='./item_to_cate_path.pkl',
+    raw_dataset_path='./raw_dataset_path.pkl',
+):
     raw_dataset_df = pd.read_csv(review_path, names=['user', 'item', 'cate', 'behavior', 'timestamp'])
     start_ts = int(time.mktime(time.strptime('2017-11-25 0:0:0', "%Y-%m-%d %H:%M:%S")))
     end_ts = int(time.mktime(time.strptime('2017-12-4 0:0:0', "%Y-%m-%d %H:%M:%S")))
@@ -30,26 +28,17 @@ def read_raw_dataset(review_path, item_to_cate_path, raw_dataset_path):
     raw_dataset_df.drop_duplicates(['user', 'item', 'behavior', 'timestamp'], inplace=True)
     raw_dataset_df.sort_values('timestamp', inplace=True)
     raw_dataset_df.reset_index(drop=True, inplace=True)
+    raw_dataset_df.to_pickle(raw_dataset_path)
 
     item_to_cate = dict(zip(raw_dataset_df['item'], raw_dataset_df['cate']))
     item_to_cate.update({'null': 'null', 'default': 'default'})
     item_to_cate = pd.Series(item_to_cate)
-
-    raw_dataset_df['cate'] = raw_dataset_df['item'].map(item_to_cate)
     item_to_cate.to_pickle(item_to_cate_path)
-    raw_dataset_df.to_pickle(raw_dataset_path)
 
-    print('read_review finished !')
     return item_to_cate, raw_dataset_df
 
 
-def reduce_to_k_core(dataset_df, dirpath, file_prefix, k_core):
-    reduced_dataset_path = os.path.join(dirpath, f'{file_prefix}-reduced_dataset.pkl')
-    if os.path.exists(reduced_dataset_path):
-        reduced_dataset_df = pd.read_pickle(reduced_dataset_path)
-        print(f'reduce_to_{k_core}_core finished!')
-        return reduced_dataset_df
-
+def reduce_to_k_core(dataset_df, k_core):
     user_list = dataset_df['user'].tolist()
     item_list = dataset_df['item'].tolist()
     user_offset = np.max(user_list) + 1
@@ -68,30 +57,21 @@ def reduce_to_k_core(dataset_df, dirpath, file_prefix, k_core):
         dataset_df['user'].isin(set(reduced_user_list)) & dataset_df['item'].isin(set(reduced_item_list))
     ]
 
-    print(f'reduce_to_{k_core}_core finished!')
     return reduced_dataset_df
 
 
 def process_raw_dataset(
     raw_dataset_df,
-    dirpath,
-    file_prefix,
     drop_dups=False,
     only_click=False,
     k_core=None,
     min_hist_seq_len=None,
 ):
-    processed_raw_dataset_path = os.path.join(dirpath, f'{file_prefix}-processed_raw_dataset.pkl')
-    if os.path.exists(processed_raw_dataset_path):
-        processed_raw_dataset_df = pd.read_pickle(processed_raw_dataset_path)
-        user_count = processed_raw_dataset_df.groupby('user')['user'].count()
-        item_count = processed_raw_dataset_df.groupby('item')['item'].count().to_dict()
-        cate_count = processed_raw_dataset_df.groupby('cate')['cate'].count().to_dict()
-        behavior_count = processed_raw_dataset_df.groupby('behavior')['behavior'].count().to_dict()
-        print('process_raw_dataset finished!')
-        return processed_raw_dataset_df, user_count, item_count, cate_count, behavior_count
-
     processed_raw_dataset_df = raw_dataset_df.copy()
+    processed_raw_dataset_df['user'] = processed_raw_dataset_df['user'].map(str)
+    processed_raw_dataset_df['item'] = processed_raw_dataset_df['item'].map(str)
+    processed_raw_dataset_df['cate'] = processed_raw_dataset_df['cate'].map(str)
+    processed_raw_dataset_df['behavior'] = processed_raw_dataset_df['behavior'].map(str)
     if only_click:
         processed_raw_dataset_df = processed_raw_dataset_df[processed_raw_dataset_df['behavior'] == 'pv']
     if drop_dups is True:
@@ -100,21 +80,21 @@ def process_raw_dataset(
     if k_core is not None:
         if not isinstance(k_core, int) or k_core <= 1:
             raise ValueError(f'k_core should be an integer greater than 1, got {k_core}')
-        processed_raw_dataset_df = reduce_to_k_core(processed_raw_dataset_df, dirpath, file_prefix, k_core)
+        processed_raw_dataset_df = reduce_to_k_core(processed_raw_dataset_df, k_core)
 
     user_count = processed_raw_dataset_df.groupby('user')['user'].count()
     if min_hist_seq_len is not None:
         user_count = user_count[user_count >= min_hist_seq_len]
         user_set = set(user_count.keys())
         processed_raw_dataset_df = processed_raw_dataset_df[processed_raw_dataset_df['user'].isin(user_set)]
-    processed_raw_dataset_df.sort_values('timestamp', inplace=True)
-    processed_raw_dataset_df.reset_index(drop=True, inplace=True)
     item_count = processed_raw_dataset_df.groupby('item')['item'].count().to_dict()
     cate_count = processed_raw_dataset_df.groupby('cate')['cate'].count().to_dict()
     behavior_count = processed_raw_dataset_df.groupby('behavior')['behavior'].count().to_dict()
 
-    print('process_raw_dataset finished!')
-    return processed_raw_dataset_df, user_count, item_count, cate_count, behavior_count
+    processed_raw_dataset_df.sort_values('timestamp', inplace=True)
+    processed_raw_dataset_df.reset_index(drop=True, inplace=True)
+
+    return processed_raw_dataset_df, (user_count, item_count, cate_count, behavior_count)
 
 
 def build_entity_id_map(
@@ -125,8 +105,8 @@ def build_entity_id_map(
         entity_count = dict(sorted(entity_count.items(), key=lambda x: x[-1], reverse=True))
     else:
         entity_count = dict(entity_count.items())
-    entity_to_id_path = os.path.join(dirpath, f'{file_prefix}-{entity_prefix}_to_{id_prefix}.pkl')
-    id_to_entity_path = os.path.join(dirpath, f'{file_prefix}-{id_prefix}_to_{entity_prefix}.pkl')
+    entity_to_id_path = os.path.join(dirpath, f'{file_prefix}_{entity_prefix}_to_{id_prefix}.pkl')
+    id_to_entity_path = os.path.join(dirpath, f'{file_prefix}_{id_prefix}_to_{entity_prefix}.pkl')
 
     default_count = entity_count.get('default', 0)
     if 'default' in entity_count:
@@ -154,72 +134,61 @@ def read_reviews(
     neg_samples=None,
     test_drop_hist=None
 ):
-    file_prefix = ''
+    file_prefix = f'seq_len_{seq_len}'
     if first_lines:
-        file_prefix = f'{file_prefix}-first_lines_{first_lines}'
+        file_prefix = f'{file_prefix}-first_{first_lines}_lines'
     if drop_dups:
         file_prefix = f'{file_prefix}-drop_dups'
     if only_click:
         file_prefix = f'{file_prefix}-only_click'
     if k_core:
-        file_prefix = f'{file_prefix}-k_core_{k_core}'
+        file_prefix = f'{file_prefix}-{k_core}_core'
     if min_seq_len:
         file_prefix = f'{file_prefix}-min_seq_len_{min_seq_len}'
     if id_ordered_by_count:
         file_prefix = f'{file_prefix}-id_ordered_by_count'
-    if file_prefix.startswith('-'):
-        file_prefix = file_prefix[1:]
+    if neg_samples:
+        file_prefix = f'{file_prefix}-{neg_samples}_neg_samples'
+    if test_drop_hist:
+        file_prefix = f'{file_prefix}-test_drop_hist'
 
     abspath = os.path.abspath(review_path)
     dirpath = os.path.split(abspath)[0]
-    item_to_cate_path = os.path.join(dirpath, f'item_to_cate.pkl')
-    raw_dataset_path = os.path.join(dirpath, f'raw_dataset.pkl')
+    item_to_cate_path = os.path.join(dirpath, 'item_to_cate.pkl')
+    raw_dataset_path = os.path.join(dirpath, 'raw_dataset.pkl')
 
-    uid_count_path = os.path.join(dirpath, f'{file_prefix}-uid_count.pkl')
-    iid_to_cid_path = os.path.join(dirpath, f'{file_prefix}-iid_to_cid.pkl')
-    bid_sample_tempature_path = os.path.join(dirpath, f'{file_prefix}-bid_sample_tempature.pkl')
+    uid_count_path = os.path.join(dirpath, f'{file_prefix}_uid_count.pkl')
+    iid_to_cid_path = os.path.join(dirpath, f'{file_prefix}_iid_to_cid.pkl')
+    bid_sample_tempature_path = os.path.join(dirpath, f'{file_prefix}_bid_sample_tempature.pkl')
 
-    sparse_features_max_idx_path = os.path.join(dirpath, f'{file_prefix}-sparse_features_max_idx.pkl')
-    all_indices_path = os.path.join(dirpath, f'{file_prefix}-all_indices.pkl')
+    sparse_features_max_idx_path = os.path.join(dirpath, f'{file_prefix}_sparse_features_max_idx.pkl')
+    all_indices_path = os.path.join(dirpath, f'{file_prefix}_all_indices.pkl')
 
-    converted_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-converted_dataset_df.pkl')
-    train_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-train_dataset_df.pkl')
-    test_dataset_df_path = os.path.join(dirpath, f'{file_prefix}-test_dataset_df.pkl')
+    train_df_path = os.path.join(dirpath, f'{file_prefix}_train_df.pkl')
+    test_df_path = os.path.join(dirpath, f'{file_prefix}_test_df.pkl')
+    train_records_path = os.path.join(dirpath, f'{file_prefix}_train.tfrecords')
+    test_records_path = os.path.join(dirpath, f'{file_prefix}_test.tfrecords')
+    dataset_files = train_records_path, test_records_path
 
-    tf_records_prefix = f'seq_len_{seq_len}'
-    if neg_samples:
-        tf_records_prefix = f'{tf_records_prefix}-neg_samples_{neg_samples}'
-    if test_drop_hist:
-        tf_records_prefix = f'{tf_records_prefix}-test_drop_hist'
-    if file_prefix:
-        tf_records_prefix = f'{tf_records_prefix}-{file_prefix}'
-    train_tfrecords_path = os.path.join(dirpath, f'{tf_records_prefix}-train.tfrecords')
-    test_tfrecords_path = os.path.join(dirpath, f'{tf_records_prefix}-test.tfrecords')
-
-    return_str = '#' * 128 + '\n' + \
-        'data_files:\n' + \
-        '\ttrain_records_path:\n' + \
-        f'\t\t{train_tfrecords_path}\n' + \
-        '\test_records_path:\n' + \
-        f'\t\t{test_tfrecords_path}\n' + \
-        'sparse_features_max_idx_path:\n' + \
-        f'\t{sparse_features_max_idx_path}\n' + \
-        'all_indices_path:\n' + \
-        f'\t{all_indices_path}\n' + \
-        '#' * 128
+    return_str = 'data_files:\n' + \
+        f'\ttrain_records_path: {train_records_path}\n' + \
+        f'\ttest_records_path: {test_records_path}\n' + \
+        f'sparse_features_max_idx_path: {sparse_features_max_idx_path}\n' + \
+        f'all_indices_path: {all_indices_path}'
 
     if not from_raw:
         print(return_str)
         return
-
     item_to_cate, raw_dataset_df = \
         read_raw_dataset(review_path, item_to_cate_path, raw_dataset_path)
     if first_lines:
         raw_dataset_df = raw_dataset_df.iloc[:first_lines]
 
-    processed_raw_dataset_df, user_count, item_count, cate_count, behavior_count = process_raw_dataset(
-        raw_dataset_df, dirpath, file_prefix, drop_dups=drop_dups, only_click=only_click, k_core=k_core
-    )
+    processed_raw_dataset_df, (user_count, item_count, cate_count, behavior_count) = \
+        process_raw_dataset(
+            raw_dataset_df,
+            drop_dups=drop_dups, only_click=only_click, k_core=k_core
+        )
 
     user_to_uid, uid_to_user = \
         build_entity_id_map(user_count, 'user', 'uid', dirpath, file_prefix, id_ordered_by_count)
@@ -258,14 +227,11 @@ def read_reviews(
     uid_size, iid_size, cid_size, bid_size = \
         len(uid_to_user), len(iid_to_item), len(cid_to_cate), len(bid_to_behavior)
     sparse_features_max_idx = {'uid': uid_size, 'iid': iid_size, 'cid': cid_size, 'bid': bid_size}
-    print('#' * 128)
-    print('-' * 16 + f'    uid_size: {uid_size}, iid_size: {iid_size}, ' + f'cid_size: {cid_size}    ' + '-' * 16)
-    print('#' * 128)
     with open(sparse_features_max_idx_path, 'wb') as f:
         pkl.dump(sparse_features_max_idx, f)
 
     all_iid_index = list(iid_to_item.keys())
-    all_cid_index = list(iid_to_cid[all_iid_index])
+    all_cid_index = list(iid_to_cid[all_iid_index].values)
     all_indices = all_iid_index, all_cid_index
     with open(all_indices_path, 'wb') as f:
         pkl.dump(all_indices, f)
@@ -277,25 +243,26 @@ def read_reviews(
     converted_dataset_df['bid'] = processed_raw_dataset_df['behavior'].map(behavior_to_bid)
     converted_dataset_df['timestamp'] = processed_raw_dataset_df['timestamp']
     converted_dataset_df.sort_values('timestamp', inplace=True)
-    converted_dataset_df.reset_index(drop=True, inplace=True)
     if not first_lines:
         split_ts = int(time.mktime(time.strptime('2017-12-3 0:0:0', '%Y-%m-%d %H:%M:%S')))
     else:
         converted_dataset_df = converted_dataset_df.iloc[:first_lines]
         split_idx = int(len(converted_dataset_df) * 0.9)
         split_ts = converted_dataset_df.iloc[split_idx]['timestamp']
+    train_df = converted_dataset_df[converted_dataset_df['timestamp'] < split_ts]
+    test_df = converted_dataset_df[converted_dataset_df['timestamp'] >= split_ts]
+    train_df.to_pickle(train_df_path)
+    test_df.to_pickle(test_df_path)
 
-    train_dataset_df = converted_dataset_df[converted_dataset_df['timestamp'] < split_ts]
-    test_dataset_df = converted_dataset_df[converted_dataset_df['timestamp'] >= split_ts]
-    converted_dataset_df.to_pickle(converted_dataset_df_path)
-    train_dataset_df.to_pickle(train_dataset_df_path)
-    test_dataset_df.to_pickle(test_dataset_df_path)
+    print('#' * 128)
+    print('train_recor')
+    print('#' * 128)
 
     p_train_writer = Process(
         target=train_writer,
         args=(
-            train_tfrecords_path, train_dataset_df_path, iid_to_cid_path, bid_sample_tempature_path,
-            seq_len, iid_size, neg_samples
+            train_records_path, train_df_path, iid_to_cid_path, bid_sample_tempature_path,
+            split_ts, iid_size, neg_samples
         )
     )
     p_train_writer.daemon = True
@@ -304,8 +271,8 @@ def read_reviews(
     p_test_writer = Process(
         target=test_writer,
         args=(
-            test_tfrecords_path, train_dataset_df_path, test_dataset_df_path, iid_to_cid_path,
-            split_ts, seq_len, iid_size, neg_samples, test_drop_hist
+            test_records_path, train_df_path, test_df_path,
+            split_ts, test_drop_hist, iid_size, neg_samples
         )
     )
     p_test_writer.daemon = True
@@ -389,139 +356,96 @@ def test_writer(test_records_path, train_df_path, test_df_path, split_ts, test_d
 
 
 def train_writer(
-    train_records_path, train_dataset_df_path, iid_to_cid_path, bid_sample_tempature_path,
-    seq_len, iid_size, neg_samples
+    train_records_path, train_df_path, iid_to_cid_path, bid_sample_tempature_path,
+    split_ts, seq_len, iid_size, neg_samples
 ):
 
-    train_dataset_df = pd.read_pickle(train_dataset_df_path)
+    def _left_pad(inp, seq_len):
+        inp = np.array(inp)
+        inp_len = len(inp)
+        if inp_len >= seq_len:
+            return inp[-100:]
+        pad_width = seq_len - inp_len
+        inp = np.pad(inp, (pad_width, 0), constant_values=(0,))
+        return inp
+
+    train_df = pd.read_pickle(train_df_path)
     iid_to_cid = pd.read_pickle(iid_to_cid_path)
     bid_sample_tempature = pd.read_pickle(bid_sample_tempature_path)
 
-    pad_func = partial(_left_pad, seq_len=seq_len)
-
     print('=' * 32 + '    writing training samples    ' + '=' * 32)
-    uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_seq, uid_hist_sample_tempature_seq = \
-        {}, {}, {}, {}, {}
+    uid_hist_iid_seq, uid_unseen_iid_list, uid_hist_cid_seq, uid_hist_bid_seq, \
+        uid_hist_ts_diff_seq, uid_hist_ts_diff_seq, uid_hist_len = {}, {}, {}, {}, {}, {}, {}
 
-    diff = defaultdict(list)
-    for uid, uid_hist in train_dataset_df.groupby('uid'):
-        uid_hist_iid_seq[uid] = np.array(uid_hist['iid'].to_list())
+    for uid, uid_hist in train_df.group_by('uid'):
+        hist_iid_seq = np.array(uid_hist['iid'].to_list())
+        uid_hist_iid_seq[uid] = hist_iid_seq
+        uid_unseen_iid_list[uid] = np.array(list(set(range(iid_size)) - set(hist_iid_seq)))
         uid_hist_cid_seq[uid] = np.array(uid_hist['cid'].to_list())
-        hist_bid_seq = np.array(uid_hist['bid'].to_list())
-        uid_hist_bid_seq[uid] = hist_bid_seq
-        uid_hist_sample_tempature_seq[uid] = np.array(bid_sample_tempature[hist_bid_seq])
-        uid_hist_ts_seq[uid] = np.array(uid_hist['timestamp'].to_list())
+        uid_hist_bid_seq[uid] = np.array(uid_hist['bid'].to_list())
+        hist_ts_seq = np.array(uid_hist['timestamp'].to_list())
+        uid_hist_len[uid] = len(uid_hist)
 
     total_train_samples = 0
     with tf.io.TFRecordWriter(train_records_path) as writer:
+
         curr_uid_count = defaultdict(int)
-        for idx, row in tqdm(enumerate(train_dataset_df.itertuples())):
-            a = time.time()
-
-
+        for idx, row in tqdm(enumerate(train_df.itertuples())):
             _, uid, iid, cid, bid, timestamp = row
-            b = time.time()
-
-
-
             hist_seq_len = curr_uid_count[uid]
             hist_iid_seq = uid_hist_iid_seq[uid][:hist_seq_len]
             hist_cid_seq = uid_hist_cid_seq[uid][:hist_seq_len]
             hist_bid_seq = uid_hist_bid_seq[uid][:hist_seq_len]
-            hist_ts_seq = uid_hist_ts_seq[uid][:hist_seq_len]
-            hist_ts_diff_seq = (timestamp - hist_ts_seq) / 3600
-            hist_ts_diff_seq = hist_ts_diff_seq.astype(np.int64)
-            c = time.time()
+            hist_ts_seq = uid_hist_ts_seq[uid]
+            unseen_iid_list = uid_unseen_iid_list[uid]
 
-
-            neg_candidate_list = list(set(range(iid_size)) - set([iid]))
-            neg_iid_list = np.random.choice(neg_candidate_list, neg_samples, replace=False)
-            neg_cid_list = np.array(iid_to_cid[neg_iid_list])
-            d = time.time()
-
-            hist_sample_tempature_seq = uid_hist_sample_tempature_seq[uid][:hist_seq_len]
-            position_tempature_seq = np.arange(hist_seq_len) * 0.005
-            total_sample_tempature_seq = hist_sample_tempature_seq + position_tempature_seq
-            sample_prob = total_sample_tempature_seq / np.sum(total_sample_tempature_seq)
-            e = time.time()
+            neg_iid_list = np.random.choice(unseen_iid_list, neg_samples, replace=False)
+            neg_cid_list = iid_to_cid[neg_iid_list].values
+            hist_ts_diff = (timestamp - np.array(hist_ts_seq)) / 3600
+            hist_ts_diff = hist_ts_diff.astype(np.int64)
+            hist_sample_tempature = np.array(bid_sample_tempature[hist_bid_seq])
+            position_tempature = np.arange(hist_seq_len) * 0.005
+            total_sample_tempature = hist_sample_tempature + position_tempature
+            sample_prob = total_sample_tempature / np.sum(total_sample_tempature)
 
             sample_len = int(min(seq_len, hist_seq_len * 0.9))
-            if not sample_len:
-                sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq = (
-                    np.array([], dtype=np.int64) for _ in range(4)
-                )
-            else:
-                sample_idx = np.random.choice(hist_seq_len, sample_len, replace=False, p=sample_prob)
-                sample_idx.sort()
-                sample_iid_seq = np.array(hist_iid_seq)[sample_idx]
-                sample_cid_seq = np.array(hist_cid_seq)[sample_idx]
-                sample_bid_seq = np.array(hist_bid_seq)[sample_idx]
-                sample_ts_diff_seq = hist_ts_diff_seq[sample_idx]
-            hist_iid_seq = pad_func(hist_iid_seq)
-            hist_cid_seq = pad_func(hist_cid_seq)
-            hist_bid_seq = pad_func(hist_bid_seq)
-            hist_ts_diff_seq = pad_func(hist_ts_diff_seq)
-            hist_seq_len = min(hist_seq_len, seq_len)
-            sample_iid_seq = pad_func(sample_iid_seq)
-            sample_cid_seq = pad_func(sample_cid_seq)
-            sample_bid_seq = pad_func(sample_bid_seq)
-            sample_ts_diff_seq = pad_func(sample_ts_diff_seq)
-            f = time.time()
+            sample_idx = np.random.choice(hist_seq_len, sample_len, replace=False, p=sample_prob).sort()
+            sample_iid_seq = np.array(hist_iid_seq)[sample_idx]
+            sample_cid_seq = np.array(hist_cid_seq)[sample_idx]
+            sample_bid_seq = np.array(hist_bid_seq)[sample_idx]
+            sample_ts_diff = hist_ts_diff[sample_idx]
 
-
-
-
-            # train_example = _build_train_example(
-            #     uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
-            #     pad_func(hist_iid_seq), pad_func(hist_cid_seq), pad_func(hist_bid_seq), pad_func(hist_ts_diff_seq),
-            #     min(hist_seq_len, seq_len),
-            #     pad_func(sample_iid_seq), pad_func(sample_cid_seq), pad_func(sample_bid_seq), pad_func(sample_ts_diff_seq),
-            #     sample_len
-            # )
             train_example = _build_train_example(
-                uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
-                hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq,
-                hist_seq_len,
-                sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq,
-                sample_len
+                uid, iid, cid, neg_iid_list, neg_cid_list, bid, timestamp,
+                _left_pad(hist_iid_seq), _left_pad(hist_cid_seq), _left_pad(hist_bid_seq), _left_pad(hist_ts_diff), hist_seq_len,
+                _left_pad(sample_iid_seq), _left_pad(sample_cid_seq), _left_pad(sample_bid_seq), _left_pad(sample_ts_diff), sample_len
             )
-            g = time.time()
 
-            diff[1].append(b - a)
-            diff[2].append(c - b)
-            diff[3].append(d - c)
-            diff[4].append(e - d)
-            diff[5].append(f - e)
-            diff[6].append(g - f)
             writer.write(train_example.SerializeToString())
             total_train_samples += 1
             curr_uid_count[uid] += 1
+            curr_uid_hist_iid_seq[uid] = hist_iid_seq + [iid]
+            curr_uid_hist_cid_seq[uid] = hist_cid_seq + [cid]
+            curr_uid_hist_bid_seq[uid] = hist_bid_seq + [bid]
+            curr_uid_hist_ts_seq[uid] = hist_ts_seq + [timestamp]
             if idx % 1000 == 0:
-                print(
-                    str(sum(diff[1])) + '\n',
-                    str(sum(diff[2])) + '\n',
-                    str(sum(diff[3])) + '\n',
-                    str(sum(diff[4])) + '\n',
-                    str(sum(diff[5])) + '\n',
-                    str(sum(diff[6]))
-                )
                 writer.flush()
-    print('=' * 32 + '    writing training samples finished, {total_train_samples} total train samples   ' + '=' * 32)
+    print('=' * 16 + '    writing training samples finished, {total_train_samples} total train samples   ' + '=' * 32)
 
 
 def _build_train_example(
-    uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
+    uid, iid, cid, bid, neg_iid_list, neg_cid_list,
     hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
-    sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq, sample_len
+    sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff, sample_len
+
 ):
     feature = {
         'uid': tf.train.Feature(int64_list=tf.train.Int64List(value=[uid])),
         'iid': tf.train.Feature(int64_list=tf.train.Int64List(value=[iid])),
-        'neg_iid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_iid_list)),
         'cid': tf.train.Feature(int64_list=tf.train.Int64List(value=[cid])),
-        'neg_cid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
         'bid': tf.train.Feature(int64_list=tf.train.Int64List(value=[bid])),
-        'timestamp': tf.train.Feature(int64_list=tf.train.Int64List(value=[timestamp])),
+        'neg_iid': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_iid_list)),
+        'neg_cid': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
         'hist_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_iid_seq)),
         'hist_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_cid_seq)),
         'hist_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_bid_seq)),
@@ -530,90 +454,17 @@ def _build_train_example(
         'sample_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_iid_seq)),
         'sample_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_cid_seq)),
         'sample_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_bid_seq)),
-        'sample_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_ts_diff_seq)),
+        'sample_ts_diff': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_ts_diff)),
         'sample_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[sample_len])),
     }
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example
 
 
-def test_writer(
-    test_records_path, train_dataset_df_path, test_dataset_df_path, iid_to_cid_path,
-    split_ts, seq_len, iid_size, neg_samples, test_drop_hist
-):
-
-    train_dataset_df = pd.read_pickle(train_dataset_df_path)
-    test_dataset_df = pd.read_pickle(test_dataset_df_path)
-    iid_to_cid = pd.read_pickle(iid_to_cid_path)
-    pad_func = partial(_left_pad, seq_len=seq_len)
-
-    print('=' * 32 + '    writing testing samples    ' + '=' * 32)
-    uid_hist_iid_seq, uid_unseen_iid_list, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_diff_seq, uid_hist_len = \
-        {}, {}, {}, {}, {}, {}
-
-    for uid, uid_hist in train_dataset_df.groupby('uid'):
-        hist_iid_seq = np.array(uid_hist['iid'].to_list())
-        uid_hist_iid_seq[uid] = hist_iid_seq
-        uid_unseen_iid_list[uid] = np.array(list(set(range(iid_size)) - set(hist_iid_seq)))
-        uid_hist_cid_seq[uid] = np.array(uid_hist['cid'].to_list())
-        uid_hist_bid_seq[uid] = np.array(uid_hist['bid'].to_list())
-        hist_ts_seq = np.array(uid_hist['timestamp'].to_list())
-        hist_ts_diff_seq = (split_ts - hist_ts_seq) / 3600
-        uid_hist_ts_diff_seq[uid] = hist_ts_diff_seq.astype(np.int64)
-        uid_hist_len[uid] = len(uid_hist)
-
-    test_samples = 0
-    with tf.io.TFRecordWriter(test_records_path) as writer:
-        for idx, (uid, uid_ground_truth) in tqdm(enumerate(test_dataset_df.groupby('uid'))):
-            hist_iid_seq = uid_hist_iid_seq[uid]
-            hist_cid_seq = uid_hist_cid_seq[uid]
-            hist_bid_seq = uid_hist_bid_seq[uid]
-            hist_ts_diff_seq = uid_hist_ts_diff_seq[uid]
-            hist_seq_len = uid_hist_len[uid]
-            if hist_seq_len == 0:
-                continue
-            ground_truth_iid_seq = np.array(uid_ground_truth['iid'].to_list())
-            ground_truth_cid_seq = np.array(uid_ground_truth['cid'].to_list())
-            ground_truth_bid_seq = np.array(uid_ground_truth['bid'].to_list())
-            ground_truth_ts_seq = np.array(uid_ground_truth['timestamp'].to_list())
-            ground_truth_seq_len = len(ground_truth_iid_seq)
-            if test_drop_hist:
-                hist_iid_set = set(hist_iid_seq)
-                ground_truth_iid_idx = list(
-                    map(
-                        lambda x: x[0],
-                        filter(lambda x: x[1] not in hist_iid_set, enumerate(ground_truth_iid_seq))
-                    )
-                )
-                ground_truth_seq_len = len(ground_truth_iid_idx)
-                if ground_truth_seq_len == 0:
-                    continue
-                ground_truth_iid_seq = ground_truth_iid_seq[ground_truth_iid_idx]
-                ground_truth_cid_seq = ground_truth_cid_seq[ground_truth_iid_idx]
-                ground_truth_bid_seq = ground_truth_bid_seq[ground_truth_iid_idx]
-                ground_truth_ts_seq = ground_truth_ts_seq[ground_truth_iid_idx]
-
-            neg_sample_candidate_list = set(range(iid_size)) - set(ground_truth_iid_seq)
-            neg_iid_list = np.random.choice(neg_sample_candidate_list, neg_samples * ground_truth_seq_len, replace=False)
-            neg_cid_list = np.array(iid_to_cid[neg_iid_list])
-            test_example = _build_test_example(
-                uid, pad_func(hist_iid_seq), pad_func(hist_cid_seq), pad_func(hist_bid_seq), pad_func(hist_ts_diff_seq),
-                min(hist_seq_len, seq_len),
-                ground_truth_iid_seq, ground_truth_cid_seq, neg_iid_list, neg_cid_list,
-                ground_truth_bid_seq, ground_truth_ts_seq, ground_truth_seq_len,
-                hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len
-            )
-            writer.write(test_example.SerializeToString())
-            test_samples += ground_truth_seq_len
-            if idx % 1000 == 0:
-                writer.flush()
-
-
 def _build_test_example(
-    uid, hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
-    ground_truth_iid_seq, neg_iid_list, ground_truth_cid_seq, neg_cid_list,
-    ground_truth_bid_seq, ground_truth_ts_seq, ground_truth_seq_len,
-    all_hist_iid_seq, all_hist_cid_seq, all_hist_bid_seq, all_hist_ts_diff_seq, all_hist_seq_len
+    uid,
+    hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
+    ground_truth_iid_seq, ground_truth_cid_seq, ground_truth_bid_seq, ground_truth_ts_seq, ground_truth_seq_len
 ):
     feature = {
         'uid': tf.train.Feature(int64_list=tf.train.Int64List(value=[uid])),
@@ -623,24 +474,15 @@ def _build_test_example(
         'hist_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_ts_diff_seq)),
         'hist_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[hist_seq_len])),
         'ground_truth_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=ground_truth_iid_seq)),
-        'neg_iid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_iid_list)),
         'ground_truth_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=ground_truth_cid_seq)),
-        'neg_cid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
-        'all_hist_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=all_hist_iid_seq)),
-        'all_hist_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=all_hist_cid_seq)),
-        'all_hist_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=all_hist_bid_seq)),
-        'all_hist_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=all_hist_ts_diff_seq)),
-        'all_hist_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[all_hist_seq_len]))
+        'ground_truth_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=ground_truth_bid_seq)),
+        'ground_truth_ts_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=ground_truth_ts_seq)),
+        'ground_truth_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[ground_truth_seq_len]))
+
     }
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example
 
 
-def _left_pad(inp, seq_len):
-    inp = np.array(inp)
-    inp_len = len(inp)
-    if inp_len >= seq_len:
-        return inp[-100:]
-    pad_width = seq_len - inp_len
-    inp = np.pad(inp, (pad_width, 0), constant_values=(0,))
-    return inp
+
+

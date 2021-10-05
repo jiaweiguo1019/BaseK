@@ -15,10 +15,8 @@ from basek.utils.imports import numpy as np
 
 def read_raw_dataset(review_path, item_to_cate_path, raw_dataset_path):
     if os.path.exists(item_to_cate_path) and os.path.exists(raw_dataset_path):
-        item_to_cate = pd.read_pickle(item_to_cate_path)
-        raw_dataset_df = pd.read_pickle(raw_dataset_path)
         print('read_review finished!')
-        return item_to_cate, raw_dataset_df
+        return
 
     raw_dataset_df = pd.read_csv(review_path, names=['user', 'item', 'cate', 'behavior', 'timestamp'])
     start_ts = int(time.mktime(time.strptime('2017-11-25 0:0:0', "%Y-%m-%d %H:%M:%S")))
@@ -40,7 +38,7 @@ def read_raw_dataset(review_path, item_to_cate_path, raw_dataset_path):
     raw_dataset_df.to_pickle(raw_dataset_path)
 
     print('read_review finished !')
-    return item_to_cate, raw_dataset_df
+    return
 
 
 def reduce_to_k_core(dataset_df, dirpath, file_prefix, k_core):
@@ -74,14 +72,19 @@ def reduce_to_k_core(dataset_df, dirpath, file_prefix, k_core):
 
 def process_raw_dataset(
     raw_dataset_df,
-    dirpath,
-    file_prefix,
+    first_lines=None,
+    dirpath='./',
+    file_prefix='',
     drop_dups=False,
     only_click=False,
     k_core=None,
     min_hist_seq_len=None,
 ):
-    processed_raw_dataset_path = os.path.join(dirpath, f'{file_prefix}-processed_raw_dataset.pkl')
+    if not file_prefix:
+        processed_raw_dataset_path = os.path.join(dirpath, 'processed_raw_dataset.pkl')
+    else:
+        processed_raw_dataset_path = os.path.join(dirpath, f'{file_prefix}-processed_raw_dataset.pkl')
+
     if os.path.exists(processed_raw_dataset_path):
         processed_raw_dataset_df = pd.read_pickle(processed_raw_dataset_path)
         user_count = processed_raw_dataset_df.groupby('user')['user'].count()
@@ -91,7 +94,9 @@ def process_raw_dataset(
         print('process_raw_dataset finished!')
         return processed_raw_dataset_df, user_count, item_count, cate_count, behavior_count
 
-    processed_raw_dataset_df = raw_dataset_df.copy()
+    processed_raw_dataset_df = pd.read_pickle(raw_dataset_df)
+    if first_lines:
+        processed_raw_dataset_df = processed_raw_dataset_df.iloc[:first_lines]
     if only_click:
         processed_raw_dataset_df = processed_raw_dataset_df[processed_raw_dataset_df['behavior'] == 'pv']
     if drop_dups is True:
@@ -214,13 +219,10 @@ def read_reviews(
         print(return_str)
         return
 
-    item_to_cate, raw_dataset_df = \
-        read_raw_dataset(review_path, item_to_cate_path, raw_dataset_path)
-    if first_lines:
-        raw_dataset_df = raw_dataset_df.iloc[:first_lines]
-
+    read_raw_dataset(review_path, item_to_cate_path, raw_dataset_path)
+    item_to_cate = pd.read_pickle(item_to_cate_path)
     processed_raw_dataset_df, user_count, item_count, cate_count, behavior_count = process_raw_dataset(
-        raw_dataset_df, dirpath, file_prefix, drop_dups=drop_dups, only_click=only_click, k_core=k_core
+        raw_dataset_path, first_lines, dirpath, file_prefix, drop_dups=drop_dups, only_click=only_click, k_core=k_core
     )
 
     user_to_uid, uid_to_user = \

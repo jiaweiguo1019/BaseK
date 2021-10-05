@@ -198,7 +198,7 @@ def read_reviews(
     train_tfrecords_path = os.path.join(dirpath, f'{tf_records_prefix}-train.tfrecords')
     test_tfrecords_path = os.path.join(dirpath, f'{tf_records_prefix}-test.tfrecords')
 
-    return_str = '#' * 128 + '\n' + \
+    return_str = '#' * 132 + '\n' + \
         'data_files:\n' + \
         '\ttrain_records_path:\n' + \
         f'\t\t{train_tfrecords_path}\n' + \
@@ -208,7 +208,7 @@ def read_reviews(
         f'\t{sparse_features_max_idx_path}\n' + \
         'all_indices_path:\n' + \
         f'\t{all_indices_path}\n' + \
-        '#' * 128
+        '#' * 132
 
     if not from_raw:
         print(return_str)
@@ -260,9 +260,9 @@ def read_reviews(
     uid_size, iid_size, cid_size, bid_size = \
         len(uid_to_user), len(iid_to_item), len(cid_to_cate), len(bid_to_behavior)
     sparse_features_max_idx = {'uid': uid_size, 'iid': iid_size, 'cid': cid_size, 'bid': bid_size}
-    print('#' * 128)
+    print('#' * 132)
     print('-' * 16 + f'    uid_size: {uid_size}, iid_size: {iid_size}, ' + f'cid_size: {cid_size}    ' + '-' * 16)
-    print('#' * 128)
+    print('#' * 132)
     with open(sparse_features_max_idx_path, 'wb') as f:
         pkl.dump(sparse_features_max_idx, f)
 
@@ -376,7 +376,12 @@ def train_writer(
             curr_uid_count[uid] += 1
             if idx % 1000 == 0:
                 writer.flush()
-    print('=' * 32 + '    writing training samples finished, {total_train_samples} total train samples   ' + '=' * 32)
+    print(
+        '#' * 132 + '\n'
+        + '=' * 32 + f'    writing training samples finished, {total_train_samples} total train samples   ' + '=' * 32 + '\n'
+        + '-' * 4 + f'     test file saved in {train_records_path}    ' + '-' * 4 + '\n'
+        + '#' * 132
+    )
 
 
 def _build_train_example(
@@ -432,7 +437,7 @@ def test_writer(
         uid_hist_ts_diff_seq[uid] = hist_ts_diff_seq.astype(np.int64)
         uid_hist_len[uid] = len(uid_hist)
 
-    test_samples = 0
+    total_test_samples = 0
     with tf.io.TFRecordWriter(test_records_path) as writer:
         for idx, (uid, uid_ground_truth) in tqdm(enumerate(test_dataset_df.groupby('uid'))):
             all_hist_seq_len = uid_hist_len[uid]
@@ -475,9 +480,15 @@ def test_writer(
                 all_hist_iid_seq, all_hist_cid_seq, all_hist_bid_seq, all_hist_ts_diff_seq, all_hist_seq_len
             )
             writer.write(test_example.SerializeToString())
-            test_samples += ground_truth_seq_len
+            total_test_samples += ground_truth_seq_len
             if idx % 100 == 0:
                 writer.flush()
+    print(
+        '#' * 132 + '\n'
+        + '=' * 32 + f'     writing testing samples finished, {total_test_samples} total test samples    ' + '=' * 32 + '\n'
+        + '-' * 4 + f'     test file saved in {test_records_path}    ' + '-' * 4 + '\n'
+        + '#' * 132
+    )
 
 
 def _build_test_example(

@@ -198,7 +198,7 @@ def read_reviews(
     train_tfrecords_path = os.path.join(dirpath, f'{tf_records_prefix}-train.tfrecords')
     test_tfrecords_path = os.path.join(dirpath, f'{tf_records_prefix}-test.tfrecords')
 
-    return_str = '#' * 128 + '\n' + \
+    return_str = '#' * 132 + '\n' + \
         'data_files:\n' + \
         '\ttrain_records_path:\n' + \
         f'\t\t{train_tfrecords_path}\n' + \
@@ -208,7 +208,7 @@ def read_reviews(
         f'\t{sparse_features_max_idx_path}\n' + \
         'all_indices_path:\n' + \
         f'\t{all_indices_path}\n' + \
-        '#' * 128
+        '#' * 132
 
     if not from_raw:
         print(return_str)
@@ -260,9 +260,9 @@ def read_reviews(
     uid_size, iid_size, cid_size, bid_size = \
         len(uid_to_user), len(iid_to_item), len(cid_to_cate), len(bid_to_behavior)
     sparse_features_max_idx = {'uid': uid_size, 'iid': iid_size, 'cid': cid_size, 'bid': bid_size}
-    print('#' * 128)
+    print('#' * 132)
     print('-' * 16 + f'    uid_size: {uid_size}, iid_size: {iid_size}, ' + f'cid_size: {cid_size}    ' + '-' * 16)
-    print('#' * 128)
+    print('#' * 132)
     with open(sparse_features_max_idx_path, 'wb') as f:
         pkl.dump(sparse_features_max_idx, f)
 

@@ -127,10 +127,9 @@ if __name__ == '__main__':
     item_size = sparse_features_max_idx['iid']
     cate_size = sparse_features_max_idx['cid']
     all_iid_index, all_cid_index = all_indices
-    print('#' * 128)
     print(
-        '-' * 16 + f'    user_size: {user_size}, item_size: {item_size}, ' +
-        f'cate_size: {cate_size}    ' + '-' * 16
+        '-' * 16 + f'    user_size: {user_size}, item_size: {item_size}, '
+        + f'cate_size: {cate_size}    ' + '-' * 16 + '\n' + '#' * 132
     )
 
     timestamp = strftime("%Y%m%d_%H%M%S", localtime())
@@ -138,8 +137,7 @@ if __name__ == '__main__':
     log_path = './logs/' + timestamp
     os.makedirs(ckpt_path)
     os.makedirs(log_path)
-    print('#' * 128)
-    print('-' * 4 + f'  model weights are saved in {os.path.realpath(ckpt_path)}  ' + '-' * 4)
+    print('-' * 4 + f'  model weights are saved in {os.path.realpath(ckpt_path)}  ' + '-' * 4 + '\n' + '#' * 132)
 
     # bulid model
     train_uid = train_batch['uid']
@@ -154,8 +152,8 @@ if __name__ == '__main__':
     test_hist_cid_seq = test_batch['hist_cid_seq']
     test_hist_seq_len = test_batch['hist_seq_len']
     test_ground_truth_iid_seq = test_batch['ground_truth_iid_seq']
+    test_ground_truth_seq_len = test_batch['ground_truth_seq_len']
     all_hist_iid_seq = test_batch['all_hist_iid_seq']
-    # test_ground_truth_seq_len = test_batch['ground_truth_seq_len']
 
     uid_emb_layer = Embedding(
         user_size, USER_EMB_DIM, mask_zero=True,
@@ -285,11 +283,11 @@ if __name__ == '__main__':
     config = tf.ConfigProto()
     config.allow_soft_placement = True
     config.gpu_options.allow_growth = True
-    print('#' * 128)
     with tf.Session(config=config) as sess:
         sess.run(tf.initializers.global_variables())
         prev_time = time()
-        for epoch in range(EPOCHS):
+        test_num = 0
+        for epoch in range(1, EPOCHS + 1):
             sess.run(train_iterator.initializer)
             sess.run(test_iterator.initializer)
             total_loss = 0.0
@@ -301,19 +299,20 @@ if __name__ == '__main__':
                     total_loss += batch_loss
                     print('\r' + '-' * 32 + f'  batch: {batch_num}, loss: {batch_loss:.8f}  ' + '-' * 32, end='')
                     batch_num += 1
-
                     if batch_num % 10000 == 0:
                         curr_time = time()
                         time_elapsed = curr_time - prev_time
                         prev_time = curr_time
-                        print('\n' + '-' * 72 + f'    time elapsed: {time_elapsed:.2f}s')
+                        print('\n' + '-' * 72 + f'    time elapsed: {time_elapsed:.2f}s' + '\n' + '#' * 132)
+                        test_num += 1
+                        print('=' * 40 + f'  test times: {test_num:6d}  ' + '=' * 40)
                         sess.run(test_iterator.initializer)
                         all_item_out = sess.run(all_item_embs)
                         index.reset()
                         # faiss.normalize_L2(val_all_item_out)
                         index.add(all_item_out)
                         metrics = defaultdict(lambda: defaultdict(list))
-                        test_iteration = 0
+                        test_batch = 1
                         while True:
                             try:
                                 user_out, ground_truth_iid_seq, hist_iid_seq = sess.run(
@@ -325,23 +324,23 @@ if __name__ == '__main__':
                                 for per_metric, per_batch_metric_values in batch_metrics.items():
                                     for match_point, per_batch_metric_value in per_batch_metric_values.items():
                                         metrics[per_metric][match_point].append(per_batch_metric_value)
-                                print('\r' + '-' * 32 + f'   test iteration {test_iteration + 1}: finished   ' + '-' * 32, end='')
-                                test_iteration += 1
+                                print('\r' + '-' * 32 + f'   test batch {test_batch} finished   ' + '-' * 32, end='')
+                                test_batch += 1
                             except tf.errors.OutOfRangeError:
-                                print('\n' + '#' * 128)
                                 aggregated_metrics = defaultdict(dict)
                                 for per_metric, per_metric_values in metrics.items():
                                     for math_point, per_metric_value in per_metric_values.items():
                                         aggregated_metrics[per_metric][math_point] = \
                                             np.mean(np.concatenate(per_metric_value, axis=0))
                                 # print(aggregated_metrics)
+                                print()
                                 for per_metric, per_aggregated_metric_values in aggregated_metrics.items():
-                                    print('=' * 32 + f'        {per_metric}        ' + '=' * 32)
+                                    print('=' * 52 + f'    {per_metric}    ' + '=' * 52)
                                     per_metric_str = ''
                                     for math_point, per_aggregated_metric_value in per_aggregated_metric_values.items():
                                         per_metric_str = per_metric_str + '-' + \
                                             f' @{math_point:3d}: {per_aggregated_metric_value:.10f} ' + '-'
-                                        if len(per_metric_str) > 128:
+                                        if len(per_metric_str) > 120:
                                             print(per_metric_str)
                                             per_metric_str = ''
                                     if per_metric_str:
@@ -349,7 +348,7 @@ if __name__ == '__main__':
                                 curr_time = time()
                                 time_elapsed = curr_time - prev_time
                                 prev_time = curr_time
-                                print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s\n' + '#' * 128)
+                                print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s' + '\n' + '#' * 132)
                                 break
 
                 except tf.errors.OutOfRangeError:
@@ -357,51 +356,55 @@ if __name__ == '__main__':
                     time_elapsed = curr_time - prev_time
                     prev_time = curr_time
                     print(
-                        f'\ntrain_loss of epoch-{epoch + 1}: {(total_loss / batch_num):.8f}    ' +
-                        '-' * 36 + f'    time elapsed: {time_elapsed:.2f}s'
+                        '#' * 132 + '\n'
+                        + '=' * 32 + f'    train epoch: {epoch} finished    ' + '=' * 48
+                        + '\n' + f'train_loss of epoch-{epoch}: {(total_loss / batch_num):.8f}    '
+                        + '-' * 36 + f'    time elapsed: {time_elapsed:.2f}s'
+                        + '\n' + '#' * 132
                     )
-                    break
-
-            all_item_out = sess.run(all_item_embs)
-            index.reset()
-            # faiss.normalize_L2(val_all_item_out)
-            index.add(all_item_out)
-            metrics = defaultdict(lambda: defaultdict(list))
-            test_iteration = 0
-            while True:
-                try:
-                    user_out, ground_truth_iid_seq, hist_iid_seq = sess.run(
-                        [test_user_out, test_ground_truth_iid_seq, all_hist_iid_seq]
-                    )
-                    # faiss.normalize_L2(val_user_out)
-                    _, I = index.search(np.ascontiguousarray(user_out), MAX_MATCH_POINT)
-                    batch_metrics = compute_metrics(I, MATCH_POINTS, ground_truth_iid_seq, hist_iid_seq)
-                    for per_metric, per_batch_metric_values in batch_metrics.items():
-                        for match_point, per_batch_metric_value in per_batch_metric_values.items():
-                            metrics[per_metric][match_point].append(per_batch_metric_value)
-                    print('\r' + '-' * 42 + f'  test interation {test_iteration + 1}: finished  ' + '-' * 42, end='')
-                    test_iteration += 1
-                except tf.errors.OutOfRangeError:
-                    print()
-                    aggregated_metrics = defaultdict(dict)
-                    for per_metric, per_metric_values in metrics.items():
-                        for math_point, per_metric_value in per_metric_values.items():
-                            aggregated_metrics[per_metric][math_point] = \
-                                np.mean(np.concatenate(per_metric_value, axis=0))
-                    # print(aggregated_metrics)
-                    for per_metric, per_aggregated_metric_values in aggregated_metrics.items():
-                        print('=' * 32 + f'        {per_metric}        ' + '=' * 32)
-                        per_metric_str = ''
-                        for math_point, per_aggregated_metric_value in per_aggregated_metric_values.items():
-                            per_metric_str = per_metric_str + '-' * 2 + \
-                                f' @{math_point}: {per_aggregated_metric_value:.10f} ' + '-' * 2
-                            if len(per_metric_str) > 128:
-                                print(per_metric_str)
+                    test_num += 1
+                    print('=' * 40 + f'test times: {test_num:6d}' + '=' * 40)
+                    sess.run(test_iterator.initializer)
+                    all_item_out = sess.run(all_item_embs)
+                    index.reset()
+                    # faiss.normalize_L2(val_all_item_out)
+                    index.add(all_item_out)
+                    metrics = defaultdict(lambda: defaultdict(list))
+                    test_batch = 1
+                    while True:
+                        try:
+                            user_out, ground_truth_iid_seq, hist_iid_seq = sess.run(
+                                [test_user_out, test_ground_truth_iid_seq, all_hist_iid_seq]
+                            )
+                            # faiss.normalize_L2(val_user_out)
+                            _, I = index.search(np.ascontiguousarray(user_out), MAX_MATCH_POINT)
+                            batch_metrics = compute_metrics(I, MATCH_POINTS, ground_truth_iid_seq, hist_iid_seq)
+                            for per_metric, per_batch_metric_values in batch_metrics.items():
+                                for match_point, per_batch_metric_value in per_batch_metric_values.items():
+                                    metrics[per_metric][match_point].append(per_batch_metric_value)
+                            print('\r' + '-' * 32 + f'   test batch {test_batch} finished   ' + '-' * 32, end='')
+                            test_batch += 1
+                        except tf.errors.OutOfRangeError:
+                            aggregated_metrics = defaultdict(dict)
+                            for per_metric, per_metric_values in metrics.items():
+                                for math_point, per_metric_value in per_metric_values.items():
+                                    aggregated_metrics[per_metric][math_point] = \
+                                        np.mean(np.concatenate(per_metric_value, axis=0))
+                            # print(aggregated_metrics)
+                            for per_metric, per_aggregated_metric_values in aggregated_metrics.items():
+                                print('=' * 52 + f'    {per_metric}    ' + '=' * 52)
                                 per_metric_str = ''
-                        if per_metric_str:
-                            print(per_metric_str)
-                    curr_time = time()
-                    time_elapsed = curr_time - prev_time
-                    prev_time = curr_time
-                    print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s\n' + '#' * 128)
+                                for math_point, per_aggregated_metric_value in per_aggregated_metric_values.items():
+                                    per_metric_str = per_metric_str + '-' + \
+                                        f' @{math_point:3d}: {per_aggregated_metric_value:.10f} ' + '-'
+                                    if len(per_metric_str) > 120:
+                                        print(per_metric_str)
+                                        per_metric_str = ''
+                                if per_metric_str:
+                                    print(per_metric_str)
+                            curr_time = time()
+                            time_elapsed = curr_time - prev_time
+                            prev_time = curr_time
+                            print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s' + '\n' + '#' * 132)
+                            break
                     break

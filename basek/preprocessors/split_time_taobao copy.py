@@ -254,9 +254,9 @@ def read_reviews(
     train_df.to_pickle(train_df_path)
     test_df.to_pickle(test_df_path)
 
-    print('#' * 128)
+    print('#' * 132)
     print('train_recor')
-    print('#' * 128)
+    print('#' * 132)
 
     p_train_writer = Process(
         target=train_writer,

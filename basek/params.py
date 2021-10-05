@@ -18,6 +18,6 @@ parser.add_argument('-e', '--epochs', type=int, default=50, help='num of epochs'
 
 args, _ = parser.parse_known_args()
 
-print('=' * 120)
+print('#' * 132)
 print(args)
-print('=' * 120)
+print('#' * 132)

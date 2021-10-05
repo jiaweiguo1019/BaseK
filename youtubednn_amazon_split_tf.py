@@ -25,7 +25,7 @@ USER_EMB_DIM = 32
 ITEM_EMB_DIM = 32
 CATE_EMB_DIM = 16
 EPOCHS = args.epochs
-BATCH_SIZE = 128
+BATCH_SIZE = 132
 MATCH_POINTS = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200, 250, 300]
 
 
@@ -362,7 +362,7 @@ if __name__ == '__main__':
                         for math_point, per_aggregated_metric_value in per_aggregated_metric_values.items():
                             per_metric_str = per_metric_str + '-' * 2 + \
                                 f'  @{math_point}: {per_aggregated_metric_value:.10f}  ' + '-' * 2
-                            if len(per_metric_str) > 128:
+                            if len(per_metric_str) > 132:
                                 print(per_metric_str)
                                 per_metric_str = ''
                         if per_metric_str:

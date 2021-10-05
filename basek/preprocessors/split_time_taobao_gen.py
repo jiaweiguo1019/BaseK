@@ -71,7 +71,7 @@ def reduce_to_k_core(dataset_df, dirpath, file_prefix, k_core):
 
 
 def process_raw_dataset(
-    raw_dataset_df,
+    raw_dataset_path,
     first_lines=None,
     dirpath='./',
     file_prefix='',
@@ -94,7 +94,7 @@ def process_raw_dataset(
         print('process_raw_dataset finished!')
         return processed_raw_dataset_df, user_count, item_count, cate_count, behavior_count
 
-    processed_raw_dataset_df = pd.read_pickle(raw_dataset_df)
+    processed_raw_dataset_df = pd.read_pickle(raw_dataset_path)
     if first_lines:
         processed_raw_dataset_df = processed_raw_dataset_df.iloc[:first_lines]
     if only_click:

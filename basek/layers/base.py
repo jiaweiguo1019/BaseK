@@ -3,11 +3,14 @@ from basek.utils.imports import numpy as np
 from basek.utils.tf_compat import keras, tf
 
 
+BatchNormalization = keras.layers.BatchNormalization
 Dense = keras.layers.Dense
+Dropout = keras.layers.Dropout
 Embedding = keras.layers.Embedding
 Flatten = keras.layers.Flatten
 Lambda = keras.layers.Lambda
 Layer = keras.layers.Layer
+LayerNormalization = keras.layers.LayerNormalization
 Input = keras.layers.Input
 
 

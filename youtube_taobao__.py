@@ -1,14 +1,17 @@
 from basek.params import args
 import os
+from collections import defaultdict
 
 import pickle as pkl
 from time import localtime, strftime, time
-from multiprocessing import Process, Queue
+from tqdm import tqdm
 
 import faiss
 from basek.utils.imports import numpy as np
 from basek.utils.imports import random
 
+
+from basek.preprocessors.split_time_taobao_copy import read_reviews
 from basek.utils.tf_compat import tf, keras
 import tensorflow_addons as tfa
 
@@ -16,7 +19,7 @@ from basek.layers.base import (
     BiasAdd, BatchNormalization, Concatenate, Dense, Dropout, Embedding, Flatten, Index, Lambda, LayerNormalization
 )
 
-from basek.utils.metrics__ import ComputeMetrics
+from basek.utils.metrics_ import ComputeMetrics
 
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus
 
@@ -68,7 +71,7 @@ if __name__ == '__main__':
 
     sparse_features = ['uid', 'iid', 'cid']
 
-    dirpath = '/data/project/datasets/Taobao/pp_30-k_core_20-id_ordered_by_count'
+    dirpath = '/data/project/datasets/Taobao/pp_30-k_core_10-id_ordered_by_count'
     sparse_features_max_idx_path = os.path.join(dirpath, 'sparse_features_max_idx.pkl')
     all_indices_path = os.path.join(dirpath, 'all_indices.pkl')
     train_file = os.path.join(dirpath, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-train.tfrecords')
@@ -83,7 +86,7 @@ if __name__ == '__main__':
 
     test_dataset = tf.data.TFRecordDataset(test_file)
     test_dataset = test_dataset.map(parser, num_parallel_calls=-1)
-    test_dataset = test_dataset.padded_batch(BATCH_SIZE).prefetch(10)
+    test_dataset = test_dataset.padded_batch(16 * BATCH_SIZE).prefetch(10)
     test_iterator = tf.data.make_initializable_iterator(test_dataset)
     test_batch = test_iterator.get_next()
 
@@ -91,6 +94,7 @@ if __name__ == '__main__':
         sparse_features_max_idx = pkl.load(f)
     with open(all_indices_path, 'rb') as f:
         all_indices = pkl.load(f)
+
 
     user_size = sparse_features_max_idx['uid']
     item_size = sparse_features_max_idx['iid']
@@ -225,11 +229,7 @@ if __name__ == '__main__':
     index = faiss.GpuIndexFlatL2(res, ITEM_EMB_DIM + CATE_EMB_DIM, flat_config)
     # index = faiss.IndexFlatIP(ITEM_EMB_DIM + CATE_EMB_DIM)
 
-    metrics_q = Queue()
-    metrics_computer = ComputeMetrics(metrics_q, MATCH_POINTS, './youtube_taobao')
-    metrics_computer_p = Process(target=metrics_computer.compute_metrics)
-    metrics_computer_p.daemon = True
-    metrics_computer_p.start()
+    metrics = ComputeMetrics(MATCH_POINTS, './youtube_taobao')
 
     # definde loss and train_op
     # bias = tf.get_variable(
@@ -242,15 +242,14 @@ if __name__ == '__main__':
         biases=bias,
         labels=train_iid,
         inputs=train_user_out,
-        num_sampled=1024,
+        num_sampled=NEG_SAMPLES,
         num_classes=item_size
     )
     loss = tf.reduce_mean(loss)
-    # optimizer = tf.train.AdamOptimizer(1e-3)
-    optimizer = tfa.optimizers.AdamW(1e-6, 1e-2)
+    optimizer = tf.train.AdamOptimizer(1e-3)
     model_vars = tf.trainable_variables()
     grads = tf.gradients(loss, model_vars)
-    grads, _ = tf.clip_by_global_norm(grads, 5.0)
+    # grads, _ = tf.clip_by_global_norm(grads, 5.0)
     train_op = optimizer.apply_gradients(zip(grads, model_vars))
 
     # training loop
@@ -265,6 +264,7 @@ if __name__ == '__main__':
         # saver.restore(sess, ckpt_path)
         for epoch in range(1, EPOCHS + 1):
             sess.run(train_iterator.initializer)
+            sess.run(test_iterator.initializer)
             total_loss = 0.0
             # model.save_weights(ckpt_path + f'/{epoch}')
             batch_num = 0
@@ -274,7 +274,7 @@ if __name__ == '__main__':
                     total_loss += batch_loss
                     print('\r' + '-' * 32 + f'  batch: {batch_num + 1}, loss: {batch_loss:.8f}  ' + '-' * 32, end='')
                     batch_num += 1
-                    if batch_num % 1000 == 0:
+                    if batch_num % 10000 == 1:
                         curr_time = time()
                         time_elapsed = curr_time - prev_time
                         prev_time = curr_time
@@ -292,15 +292,15 @@ if __name__ == '__main__':
                                 user_out, iid = sess.run([test_user_out, test_iid])
                                 # faiss.normalize_L2(val_user_out)
                                 _, I = index.search(np.ascontiguousarray(user_out), MAX_MATCH_POINT)
-                                metrics_q.put((I, iid, False, False))
+                                metrics.add_one_batch(I, iid)
                                 print('\r' + '-' * 32 + f'   test batch {test_batch} finished   ' + '-' * 32, end='')
                                 test_batch += 1
                             except tf.errors.OutOfRangeError:
-                                metrics_q.put((None, None, True, False))
+                                metrics.print_metrics()
                                 curr_time = time()
                                 time_elapsed = curr_time - prev_time
                                 prev_time = curr_time
-                                print('\n' + '-' * 72 + f'    time elapsed: {time_elapsed:.2f}s' + '\n' + '#' * 132)
+                                print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s' + '\n' + '#' * 132)
                                 break
 
                 except tf.errors.OutOfRangeError:
@@ -327,17 +327,15 @@ if __name__ == '__main__':
                             user_out, iid = sess.run([test_user_out, test_iid])
                             # faiss.normalize_L2(val_user_out)
                             _, I = index.search(np.ascontiguousarray(user_out), MAX_MATCH_POINT)
-                            metrics_q.put((I, iid, False, False))
+                            metrics.add_one_batch(I, iid)
                             print('\r' + '-' * 32 + f'   test batch {test_batch} finished   ' + '-' * 32, end='')
                             test_batch += 1
                         except tf.errors.OutOfRangeError:
-                            metrics_q.put((None, None, True, False))
+                            metrics.print_metrics()
                             curr_time = time()
                             time_elapsed = curr_time - prev_time
                             prev_time = curr_time
-                            print('\n' + '-' * 72 + f'    time elapsed: {time_elapsed:.2f}s' + '\n' + '#' * 132)
+                            print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s' + '\n' + '#' * 132)
                             break
+                    saver.save(ckpt_path, epoch)
                     break
-            # saver.save(sess, ckpt_path, epoch)
-    metrics_q.put((None, None, None, True))
-    metrics_computer_p.join()

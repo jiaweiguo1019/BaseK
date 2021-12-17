@@ -1,19 +1,18 @@
-import json
 import os
+from threading import Thread
+import networkx as nx
 import pickle as pkl
 import time
 from collections import defaultdict
-from threading import Thread
 
 import pandas as pd
-import networkx as nx
 from tqdm import tqdm
 
 from basek.utils.tf_compat import tf
 from basek.utils.imports import numpy as np
 
 
-def read_raw_dataset(review_path, savepath, pp=None):
+def read_raw_dataset(review_path, savepath, pp):
     item_to_cate_path = os.path.join(savepath, 'item_to_cate.pkl')
     raw_dataset_path = os.path.join(savepath, 'raw_dataset.pkl')
     if os.path.exists(item_to_cate_path) and os.path.exists(raw_dataset_path):
@@ -22,17 +21,13 @@ def read_raw_dataset(review_path, savepath, pp=None):
         print('read_review finished!')
         return item_to_cate, raw_dataset_df
 
-    raw_dataset_df = pd.read_csv(review_path, header=None, names=['user', 'item', 'cate', 'behavior', 'timestamp'])
-    start_ts = int(time.mktime(time.strptime('2017-11-25 0:0:0', "%Y-%m-%d %H:%M:%S")))
-    end_ts = int(time.mktime(time.strptime('2017-12-4 0:0:0', "%Y-%m-%d %H:%M:%S")))
+    raw_dataset_df = pd.read_pickle(review_path)
+    start_ts = int(time.mktime(time.strptime('2021-08-20 0:0:0', "%Y-%m-%d %H:%M:%S")))
+    end_ts = int(time.mktime(time.strptime('2021-08-29 0:0:0', "%Y-%m-%d %H:%M:%S")))
     raw_dataset_df = raw_dataset_df[
         (raw_dataset_df['timestamp'] >= start_ts) & (raw_dataset_df['timestamp'] < end_ts)
     ]
-
-    item_to_cate = dict(zip(raw_dataset_df['item'], raw_dataset_df['cate']))
-    item_to_cate.update({'null': 'null', 'default': 'default'})
-    item_to_cate = pd.Series(item_to_cate)
-
+    raw_dataset_df.fillna('default', inplace=True)
     if pp:
         user_list = raw_dataset_df['user'].unique()
         sampled_user_list = []
@@ -41,10 +36,14 @@ def read_raw_dataset(review_path, savepath, pp=None):
                 sampled_user_list.append(user)
         sampled_user_set = set(sampled_user_list)
         raw_dataset_df = raw_dataset_df[raw_dataset_df['user'].isin(sampled_user_set)]
-    raw_dataset_df.fillna('default', inplace=True)
     raw_dataset_df.drop_duplicates(['user', 'item', 'behavior', 'timestamp'], inplace=True)
     raw_dataset_df.sort_values('timestamp', inplace=True)
     raw_dataset_df.reset_index(drop=True, inplace=True)
+
+    item_to_cate = dict(zip(raw_dataset_df['item'], raw_dataset_df['cate']))
+    item_to_cate.update({'null': 'null', 'default': 'default'})
+    item_to_cate = pd.Series(item_to_cate)
+
     raw_dataset_df['cate'] = raw_dataset_df['item'].map(item_to_cate)
     item_to_cate.to_pickle(item_to_cate_path)
     raw_dataset_df.to_pickle(raw_dataset_path)
@@ -61,7 +60,6 @@ def reduce_to_k_core(dataset_df, savepath, k_core):
         print(f'reduce_to_{k_core}_core finished!')
         return reduced_dataset_df
 
-    sep = '$^$'
     user_list = dataset_df['user'].tolist()
     item_list = dataset_df['item'].tolist()
     user_offset = np.max(user_list) + 1
@@ -70,17 +68,14 @@ def reduce_to_k_core(dataset_df, savepath, k_core):
 
     g = nx.Graph()
     g.add_edges_from(edges)
-    user_and_item = list(nx.k_core(g, k_core).edges)
+    user_and_item = list(nx.k_core(g, k_core).nodes)
     if not user_and_item:
         raise ValueError(f'k_core numbser: {k_core} is too much, no more interactons left')
-    reduced_user_list, reduced_item_list = list(zip(*user_and_item))
-    reduced_user_list = np.array(reduced_user_list) + user_offset
-    reduced_item_list = np.array(reduced_item_list) - item_offset
-    reduced_user_set = set(reduced_user_list)
-    reduced_item_set = set(reduced_item_list)
 
+    reduced_user_list = np.array(list(filter(lambda x: x < 0, user_and_item))) + user_offset
+    reduced_item_list = np.array(list(filter(lambda x: x > 0, user_and_item))) - item_offset
     reduced_dataset_df = dataset_df[
-        dataset_df['user'].isin(reduced_user_set) & dataset_df['item'].isin(reduced_item_set)
+        dataset_df['user'].isin(set(reduced_user_list)) & dataset_df['item'].isin(set(reduced_item_list))
     ]
     reduced_dataset_df = reduced_dataset_df.copy()
     reduced_dataset_df.to_pickle(reduced_dataset_path)
@@ -159,27 +154,27 @@ def build_entity_id_map(
     return entity_to_id, id_to_entity
 
 
-# def build_ordinal_entity_id_map(
-#     entity_count, entity_prefix='default',
-#     id_prefix='default', savepath='./'
-# ):
-#     entity_to_id_path = os.path.join(savepath, f'{entity_prefix}_to_{id_prefix}.pkl')
-#     id_to_entity_path = os.path.join(savepath, f'{id_prefix}_to_{entity_prefix}.pkl')
+def build_ordinal_entity_id_map(
+    entity_count, entity_prefix='default',
+    id_prefix='default', savepath='./'
+):
+    entity_to_id_path = os.path.join(savepath, f'{entity_prefix}_to_{id_prefix}.pkl')
+    id_to_entity_path = os.path.join(savepath, f'{id_prefix}_to_{entity_prefix}.pkl')
 
-#     entities = sorted(list(entity_count.keys()))
+    entities = sorted(list(entity_count.keys()))
 
-#     entity_to_id = {'null': 0, 'default': 1}
-#     id_to_entity = {0: 'null', 1: 'default'}
-#     for idx, entity in enumerate(entities):
-#         entity_to_id[entity] = idx + 2
-#         id_to_entity[idx + 2] = entity
+    entity_to_id = {'null': 0, 'default': 1}
+    id_to_entity = {0: 'null', 1: 'default'}
+    for idx, entity in enumerate(entities):
+        entity_to_id[entity] = idx + 2
+        id_to_entity[idx + 2] = entity
 
-#     entity_to_id = pd.Series(entity_to_id)
-#     id_to_entity = pd.Series(id_to_entity)
-#     entity_to_id.to_pickle(entity_to_id_path)
-#     id_to_entity.to_pickle(id_to_entity_path)
+    entity_to_id = pd.Series(entity_to_id)
+    id_to_entity = pd.Series(id_to_entity)
+    entity_to_id.to_pickle(entity_to_id_path)
+    id_to_entity.to_pickle(id_to_entity_path)
 
-#     return entity_to_id, id_to_entity
+    return entity_to_id, id_to_entity
 
 
 def read_reviews(
@@ -202,17 +197,15 @@ def read_reviews(
         build_entity_id_map(item_count, 'item', 'iid', savepath, id_ordered_by_count)
     cate_to_cid, cid_to_cate = \
         build_entity_id_map(cate_count, 'cate', 'cid', savepath, id_ordered_by_count)
-    behavior_to_bid, bid_to_behavior = \
-        build_entity_id_map(behavior_count, 'behavior', 'bid', savepath, id_ordered_by_count)
 
     if id_ordered_by_count:
         uid_count_path = os.path.join(savepath, 'id_ordered_by_count-uid_count.pkl')
         iid_to_cid_path = os.path.join(savepath, 'id_ordered_by_count-iid_to_cid.pkl')
-        # bid_to_sample_tempature_path = os.path.join(savepath, 'id_ordered_by_count-bid_to_sample_tempature.pkl')
+        bid_to_sample_tempature_path = os.path.join(savepath, 'id_ordered_by_count-bid_to_sample_tempature.pkl')
     else:
         uid_count_path = os.path.join(savepath, 'no_id_ordered_by_count-uid_count.pkl')
         iid_to_cid_path = os.path.join(savepath, 'no_id_ordered_by_count-iid_to_cid.pkl')
-        # bid_to_sample_tempature_path = os.path.join(savepath, 'no_id_ordered_by_count-bid_to_sample_tempature.pkl')
+        bid_to_sample_tempature_path = os.path.join(savepath, 'no_id_ordered_by_count-bid_to_sample_tempature.pkl')
     uid_count = {}
     for user, count in user_count.items():
         uid = user_to_uid[user]
@@ -227,12 +220,14 @@ def read_reviews(
     iid_to_cid = pd.Series(iid_to_cid)
     iid_to_cid.to_pickle(iid_to_cid_path)
 
-    # bid_to_sample_tempature_path = os.path.join(savepath, 'bid_to_sample_tempature.pkl')
-    # bid_to_sample_tempature = {}
-    # for bid in bid_to_behavior.keys():
-    #     bid_to_sample_tempature[bid] = bid - 1
-    # bid_to_sample_tempature = pd.Series(bid_to_sample_tempature)
-    # bid_to_sample_tempature.to_pickle(bid_to_sample_tempature_path)
+    behavior_to_bid, bid_to_behavior = \
+        build_ordinal_entity_id_map(behavior_count, 'behavior', 'bid', savepath)
+    bid_to_sample_tempature_path = os.path.join(savepath, 'bid_to_sample_tempature.pkl')
+    bid_to_sample_tempature = {}
+    for bid in bid_to_behavior.keys():
+        bid_to_sample_tempature[bid] = bid - 1
+    bid_to_sample_tempature = pd.Series(bid_to_sample_tempature)
+    bid_to_sample_tempature.to_pickle(bid_to_sample_tempature_path)
 
     sparse_features_max_idx_path = os.path.join(savepath, 'sparse_features_max_idx.pkl')
     uid_size, iid_size, cid_size, bid_size = \
@@ -268,71 +263,9 @@ def read_reviews(
 
 
 def records_writer(
-    savepath, max_seq_len, neg_samples=10, id_ordered_by_count=True,
+    savepath, max_seq_len, neg_samples=0, id_ordered_by_count=True,
     write_train=True, write_test=True
 ):
-
-    def _pad_func(inp, max_seq_len):
-        inp = np.array(inp)
-        inp_len = inp.shape[0]
-        if inp_len >= max_seq_len:
-            return inp[-max_seq_len:]
-        res = np.zeros(shape=(max_seq_len,), dtype=np.int64)
-        res[0: inp_len] = inp
-        return res
-
-    def _build_test_example(
-        uid,
-        ground_truth_iid_seq, ground_truth_cid_seq, ground_truth_bid_seq, ground_truth_ts_seq, ground_truth_seq_len,
-        neg_iid_list, neg_cid_list,
-        hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
-        all_hist_iid_seq, all_hist_cid_seq, all_hist_bid_seq, all_hist_ts_diff_seq, all_hist_seq_len,
-    ):
-        feature = {
-            'uid': tf.train.Feature(int64_list=tf.train.Int64List(value=[uid])),
-            'ground_truth_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=ground_truth_iid_seq)),
-            'ground_truth_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=ground_truth_cid_seq)),
-            'ground_truth_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=ground_truth_bid_seq)),
-            'ground_truth_ts_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=ground_truth_ts_seq)),
-            'ground_truth_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[ground_truth_seq_len])),
-            'neg_iid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_iid_list)),
-            'neg_cid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
-            'hist_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_iid_seq)),
-            'hist_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_cid_seq)),
-            'hist_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_bid_seq)),
-            'hist_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_ts_diff_seq)),
-            'hist_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[hist_seq_len])),
-            'all_hist_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=all_hist_iid_seq)),
-            'all_hist_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=all_hist_cid_seq)),
-            'all_hist_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=all_hist_bid_seq)),
-            'all_hist_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=all_hist_ts_diff_seq)),
-            'all_hist_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[all_hist_seq_len])),
-        }
-        example = tf.train.Example(features=tf.train.Features(feature=feature))
-        return example
-
-    def _build_train_example(
-        uid,
-        iid, cid, bid, timestamp,
-        neg_iid_list, neg_cid_list,
-        hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
-    ):
-        feature = {
-            'uid': tf.train.Feature(int64_list=tf.train.Int64List(value=[uid])),
-            'iid': tf.train.Feature(int64_list=tf.train.Int64List(value=[iid])),
-            'cid': tf.train.Feature(int64_list=tf.train.Int64List(value=[cid])),
-            'bid': tf.train.Feature(int64_list=tf.train.Int64List(value=[bid])),
-            'timestamp': tf.train.Feature(int64_list=tf.train.Int64List(value=[timestamp])),
-            'neg_iid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_iid_list)),
-            'neg_cid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
-            'hist_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_iid_seq)),
-            'hist_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_cid_seq)),
-            'hist_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_bid_seq)),
-            'hist_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_ts_diff_seq)),
-            'hist_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[hist_seq_len])),
-        }
-        example = tf.train.Example(features=tf.train.Features(feature=feature))
-        return example
 
     print('=' * 36 + '    writing samples    ' + '=' * 36)
 
@@ -344,22 +277,21 @@ def records_writer(
         tfrecords_prefix = f'{tfrecords_prefix}-id_ordered_by_count'
         dataset_df_path = os.path.join(savepath, 'id_ordered_by_count-dataset_df.pkl')
         iid_to_cid_path = os.path.join(savepath, 'id_ordered_by_count-iid_to_cid.pkl')
-        # bid_to_sample_tempature_path = os.path.join(savepath, 'id_ordered_by_count-bid_to_sample_tempature.pkl')
     else:
         tfrecords_prefix = f'{tfrecords_prefix}-no_id_ordered_by_count'
         dataset_df_path = os.path.join(savepath, 'no_id_ordered_by_count-dataset_df.pkl')
         iid_to_cid_path = os.path.join(savepath, 'no_id_ordered_by_count-iid_to_cid.pkl')
-        # bid_to_sample_tempature_path = os.path.join(savepath, 'no_id_ordered_by_count-bid_to_sample_tempature.pkl')
+    bid_to_sample_tempature_path = os.path.join(savepath, 'bid_to_sample_tempature.pkl')
 
     dataset_df = pd.read_pickle(dataset_df_path)
     with open(sparse_features_max_idx_path, 'rb') as f:
         sparse_features_max = pkl.load(f)
     iid_size = sparse_features_max['iid']
-    # bid_size = sparse_features_max['bid']
+    bid_size = sparse_features_max['bid']
     iid_to_cid = pd.read_pickle(iid_to_cid_path)
     iid_to_cid = iid_to_cid[range(iid_size)].values
-    # bid_to_sample_tempature = pd.read_pickle(bid_to_sample_tempature_path)
-    # bid_to_sample_tempature = bid_to_sample_tempature[range(bid_size)].values
+    bid_to_sample_tempature = pd.read_pickle(bid_to_sample_tempature_path)
+    bid_to_sample_tempature = bid_to_sample_tempature[range(bid_size)].values
 
     if id_ordered_by_count:
         uid_neg_iid_list_path = \
@@ -371,8 +303,8 @@ def records_writer(
             os.path.join(savepath, f'neg_samples_{neg_samples}-no_id_ordered_by_count-uid_neg_iid_list.pkl')
         uid_neg_cid_list_path = \
             os.path.join(savepath, f'neg_samples_{neg_samples}-no_id_ordered_by_count-uid_neg_cid_list.pkl')
-    uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_seq, uid_hist_seq_len = {}, {}, {}, {}, {}
-
+    uid_hist_iid_seq, uid_hist_cid_seq, uid_hist_bid_seq, uid_hist_ts_seq, uid_hist_sample_tempature_seq, uid_hist_seq_len = \
+        {}, {}, {}, {}, {}, {}
     if os.path.exists(uid_neg_iid_list_path) and os.path.exists(uid_neg_cid_list_path):
         neg_sample_finished = True
         with open(uid_neg_iid_list_path, 'rb') as f:
@@ -384,16 +316,18 @@ def records_writer(
         uid_neg_iid_list, uid_neg_cid_list = {}, {}
 
     all_sample_list = np.array(list(range(1, iid_size)))
-    for uid, hist_seq in tqdm(dataset_df.groupby('uid')):
-        hist_iid_seq = np.array(hist_seq['iid'].to_list())
-        hist_cid_seq = np.array(hist_seq['cid'].to_list())
-        hist_bid_seq = np.array(hist_seq['bid'].to_list())
-        hist_ts_seq = np.array(hist_seq['timestamp'].to_list())
+    for uid, uid_hist in tqdm(dataset_df.groupby('uid')):
+        hist_iid_seq = np.array(uid_hist['iid'].to_list())
+        hist_cid_seq = np.array(uid_hist['cid'].to_list())
+        hist_bid_seq = np.array(uid_hist['bid'].to_list())
+        hist_ts_seq = np.array(uid_hist['timestamp'].to_list())
+        hist_sample_tempature_seq = bid_to_sample_tempature[hist_bid_seq]
         hist_seq_len = hist_iid_seq.shape[0]
         uid_hist_iid_seq[uid] = hist_iid_seq
         uid_hist_cid_seq[uid] = hist_cid_seq
         uid_hist_bid_seq[uid] = hist_bid_seq
         uid_hist_ts_seq[uid] = hist_ts_seq
+        uid_hist_sample_tempature_seq[uid] = hist_sample_tempature_seq
         uid_hist_seq_len[uid] = hist_seq_len
         if not neg_sample_finished:
             hist_iid_set = set(hist_iid_seq)
@@ -417,74 +351,59 @@ def records_writer(
             pkl.dump(uid_neg_cid_list, f)
         neg_sample_finished = True
 
-    split_ts = int(time.mktime(time.strptime('2017-12-3 0:0:0', '%Y-%m-%d %H:%M:%S')))
-    train_dataset_df = dataset_df[dataset_df['timestamp'] < split_ts].copy()
-    train_dataset_df.sort_values('timestamp', inplace=True)
-    train_dataset_df.reset_index(drop=True, inplace=True)
-    test_dataset_df = dataset_df[dataset_df['timestamp'] >= split_ts].copy()
-    test_dataset_df.sort_values('timestamp', inplace=True)
-    test_dataset_df.reset_index(drop=True, inplace=True)
+    def _build_example(
+        uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
+        hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
+        sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq, sample_len
+    ):
+        feature = {
+            'uid': tf.train.Feature(int64_list=tf.train.Int64List(value=[uid])),
+            'iid': tf.train.Feature(int64_list=tf.train.Int64List(value=[iid])),
+            'neg_iid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_iid_list)),
+            'cid': tf.train.Feature(int64_list=tf.train.Int64List(value=[cid])),
+            'neg_cid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
+            'bid': tf.train.Feature(int64_list=tf.train.Int64List(value=[bid])),
+            'timestamp': tf.train.Feature(int64_list=tf.train.Int64List(value=[timestamp])),
+            'hist_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_iid_seq)),
+            'hist_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_cid_seq)),
+            'hist_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_bid_seq)),
+            'hist_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_ts_diff_seq)),
+            'hist_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[hist_seq_len])),
+            'sample_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_iid_seq)),
+            'sample_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_cid_seq)),
+            'sample_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_bid_seq)),
+            'sample_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_ts_diff_seq)),
+            'sample_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[sample_len])),
+        }
+        example = tf.train.Example(features=tf.train.Features(feature=feature))
+        return example
 
-    def _test_writer():
-        train_dataset_df_group = train_dataset_df.groupby('uid')
-        test_dataset_df_group = test_dataset_df.groupby('uid')
-        tfrecords_path = os.path.join(savepath, f'{tfrecords_prefix}-test.tfrecords')
-        total_samples = 0
-        with tf.io.TFRecordWriter(tfrecords_path) as writer:
-            for idx, (uid, hist) in tqdm(enumerate(train_dataset_df_group)):
-                try:
-                    test_dataset_df_group.get_group(uid)
-                except KeyError:
-                    continue
-                all_hist_seq_len = len(hist)
-                all_hist_iid_seq = uid_hist_iid_seq[uid][:all_hist_seq_len]
-                all_hist_cid_seq = uid_hist_cid_seq[uid][:all_hist_seq_len]
-                all_hist_bid_seq = uid_hist_bid_seq[uid][:all_hist_seq_len]
-                all_hist_ts_seq = uid_hist_ts_seq[uid][:all_hist_seq_len]
-                all_hist_ts_diff_seq = (split_ts - all_hist_ts_seq) / 3600
-                all_hist_ts_diff_seq = all_hist_ts_diff_seq.astype(np.int64)
+    def _pad_func(inp, max_seq_len):
+        inp = np.array(inp)
+        inp_len = inp.shape[0]
+        if inp_len >= max_seq_len:
+            return inp[-max_seq_len:]
+        res = np.zeros(shape=(max_seq_len,), dtype=np.int64)
+        res[0: inp_len] = inp
+        return res
 
-                hist_seq_len = min(all_hist_seq_len, max_seq_len)
-                hist_iid_seq = _pad_func(all_hist_iid_seq, max_seq_len)
-                hist_cid_seq = _pad_func(all_hist_cid_seq, max_seq_len)
-                hist_bid_seq = _pad_func(all_hist_bid_seq, max_seq_len)
-                hist_ts_diff_seq = _pad_func(all_hist_ts_diff_seq, max_seq_len)
-
-                neg_iid_list = uid_neg_iid_list[uid][all_hist_seq_len:]
-                neg_cid_list = uid_neg_cid_list[uid][all_hist_seq_len:]
-
-                ground_truth_iid_seq = uid_hist_iid_seq[uid][all_hist_seq_len:]
-                ground_truth_cid_seq = uid_hist_cid_seq[uid][all_hist_seq_len:]
-                ground_truth_bid_seq = uid_hist_bid_seq[uid][all_hist_seq_len:]
-                ground_truth_ts_seq = uid_hist_ts_seq[uid][all_hist_seq_len:]
-                ground_truth_seq_len = ground_truth_iid_seq.shape[0]
-                test_example = _build_test_example(
-                    uid,
-                    ground_truth_iid_seq, ground_truth_cid_seq, ground_truth_bid_seq, ground_truth_ts_seq, ground_truth_seq_len,
-                    neg_iid_list, neg_cid_list,
-                    hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
-                    all_hist_iid_seq, all_hist_cid_seq, all_hist_bid_seq, all_hist_ts_diff_seq, all_hist_seq_len
-                )
-                writer.write(test_example.SerializeToString())
-                total_samples += ground_truth_seq_len
-                if idx % 10000 == 0:
-                    writer.flush()
-        print(
-            '#' * 132 + '\n'
-            + '=' * 32 + f'    writing test samples finished, {total_samples} total samples   '
-            + '=' * 32 + '\n'
-            + '-' * 4 + f'     file saved in {tfrecords_path}    ' + '-' * 4 + '\n'
-            + '#' * 132
-        )
-
-    def _train_writer():
-        tfrecords_path = os.path.join(savepath, f'{tfrecords_prefix}-train.tfrecords')
+    def _writer(mode):
+        tfrecords_path = os.path.join(savepath, f'{tfrecords_prefix}-{mode}.tfrecords')
         total_samples = 0
         uid_curr_hist_seq_len = defaultdict(int)
         with tf.io.TFRecordWriter(tfrecords_path) as writer:
-            for idx, row in tqdm(enumerate(train_dataset_df.itertuples())):
+            for idx, row in tqdm(enumerate(dataset_df.itertuples())):
                 _, uid, iid, cid, bid, timestamp = row
                 curr_hist_seq_len = uid_curr_hist_seq_len[uid]
+                if mode == 'test':
+                    if curr_hist_seq_len != uid_hist_seq_len[uid] - 1:
+                        uid_curr_hist_seq_len[uid] += 1
+                        continue
+                    if curr_hist_seq_len == 0:
+                        continue
+                if mode == 'train':
+                    if curr_hist_seq_len == uid_hist_seq_len[uid] - 1:
+                        continue
                 neg_iid_list = uid_neg_iid_list[uid][curr_hist_seq_len * neg_samples: (curr_hist_seq_len + 1) * neg_samples]
                 neg_cid_list = uid_neg_cid_list[uid][curr_hist_seq_len * neg_samples: (curr_hist_seq_len + 1) * neg_samples]
                 hist_iid_seq = uid_hist_iid_seq[uid][:curr_hist_seq_len]
@@ -494,18 +413,39 @@ def records_writer(
                 hist_ts_diff_seq = (timestamp - hist_ts_seq) / 3600
                 hist_ts_diff_seq = hist_ts_diff_seq.astype(np.int64)
 
+                sample_len = int(min(max_seq_len, curr_hist_seq_len * 0.9))
+                if not sample_len:
+                    sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq = (
+                        np.array([], dtype=np.int64) for _ in range(4)
+                    )
+                else:
+                    hist_sample_tempature_seq = uid_hist_sample_tempature_seq[uid][:curr_hist_seq_len]
+                    position_tempature_seq = np.arange(curr_hist_seq_len) * 0.005
+                    aggregated_sample_tempature_seq = hist_sample_tempature_seq + position_tempature_seq
+                    sample_prob = aggregated_sample_tempature_seq / np.sum(aggregated_sample_tempature_seq)
+                    sample_idx = np.random.choice(curr_hist_seq_len, sample_len, replace=False, p=sample_prob)
+                    sample_idx.sort()
+                    sample_iid_seq = np.array(hist_iid_seq)[sample_idx]
+                    sample_cid_seq = np.array(hist_cid_seq)[sample_idx]
+                    sample_bid_seq = np.array(hist_bid_seq)[sample_idx]
+                    sample_ts_diff_seq = hist_ts_diff_seq[sample_idx]
+
                 hist_iid_seq = _pad_func(hist_iid_seq, max_seq_len)
                 hist_cid_seq = _pad_func(hist_cid_seq, max_seq_len)
                 hist_bid_seq = _pad_func(hist_bid_seq, max_seq_len)
                 hist_ts_diff_seq = _pad_func(hist_ts_diff_seq, max_seq_len)
                 hist_seq_len = min(curr_hist_seq_len, max_seq_len)
+                sample_iid_seq = _pad_func(sample_iid_seq, max_seq_len)
+                sample_cid_seq = _pad_func(sample_cid_seq, max_seq_len)
+                sample_bid_seq = _pad_func(sample_bid_seq, max_seq_len)
+                sample_ts_diff_seq = _pad_func(sample_ts_diff_seq, max_seq_len)
 
-                train_example = _build_train_example(
-                    uid, iid, cid, bid, timestamp,
-                    neg_iid_list, neg_cid_list,
-                    hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len
+                example = _build_example(
+                    uid, iid, neg_iid_list, cid, neg_cid_list, bid, timestamp,
+                    hist_iid_seq, hist_cid_seq, hist_bid_seq, hist_ts_diff_seq, hist_seq_len,
+                    sample_iid_seq, sample_cid_seq, sample_bid_seq, sample_ts_diff_seq, sample_len
                 )
-                writer.write(train_example.SerializeToString())
+                writer.write(example.SerializeToString())
                 total_samples += 1
                 uid_curr_hist_seq_len[uid] += 1
                 if idx % 10000 == 0:
@@ -513,22 +453,21 @@ def records_writer(
 
         print(
             '#' * 132 + '\n'
-            + '=' * 32 + f'    writing train samples finished, {total_samples} total samples   '
+            + '=' * 32 + f'    writing {mode} samples finished, {total_samples} total samples   '
             + '=' * 32 + '\n'
             + '-' * 4 + f'     file saved in {tfrecords_path}    ' + '-' * 4 + '\n'
             + '#' * 132
         )
 
     if write_train:
-        train_writer_t = Thread(target=_train_writer)
+        train_writer_t = Thread(target=_writer, kwargs={'mode': 'train'})
         train_writer_t.setDaemon(True)
         train_writer_t.start()
     if write_test:
-        test_writer_t = Thread(target=_test_writer)
+        test_writer_t = Thread(target=_writer, kwargs={'mode': 'test'})
         test_writer_t.setDaemon(True)
         test_writer_t.start()
     if write_train:
         train_writer_t.join()
     if write_test:
         test_writer_t.join()
-

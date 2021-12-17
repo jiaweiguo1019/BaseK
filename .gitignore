@@ -147,3 +147,6 @@ ckpts/
 
 # vscode things
 .vscode/
+
+# pickle things
+*.pkl

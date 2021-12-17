@@ -1,10 +1,7 @@
 from collections import defaultdict
-
-from basek.utils.imports import numpy as np
-
 from concurrent.futures import ThreadPoolExecutor
 
-import time
+from basek.utils.imports import numpy as np
 
 
 class ComputeMetrics():
@@ -27,7 +24,6 @@ class ComputeMetrics():
                 self.add_one_batch(I, iid)
             else:
                 self.print_metrics()
-
 
     def reset(self):
         self.out.write('=' * 52 + f'  test epoch-{self.count:4d} finished  ' + '=' * 52 + '\n')
@@ -59,7 +55,7 @@ class ComputeMetrics():
         mrrs = np.zeros(shape=(batch_size, max_match_point))
 
         tasks = [
-            self.executor.submit(self._compute_metrics, I, iid, hits_matrix, ndcgs, mrrs, per) \
+            self.executor.submit(self._compute_metrics, I, iid, hits_matrix, ndcgs, mrrs, per)
             for per in range(batch_size)
         ]
         for task in tasks:

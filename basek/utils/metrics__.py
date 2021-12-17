@@ -1,10 +1,7 @@
 from collections import defaultdict
-
-from basek.utils.imports import numpy as np
-
 from concurrent.futures import ThreadPoolExecutor
 
-import time
+from basek.utils.imports import numpy as np
 
 
 class ComputeMetrics():
@@ -28,9 +25,9 @@ class ComputeMetrics():
             else:
                 self.print_metrics()
 
-
     def reset(self):
-        self.out.write('=' * 52 + f'  test epoch-{self.count:4d} finished  ' + '=' * 52 + '\n')
+        self.count += 1
+        self.out.write('=' * 50 + f'   test epoch - {self.count:4d} finished   ' + '=' * 50 + '\n')
         self.out.write('#' * 132 + '\n')
         self.out.flush()
         self.metrics = defaultdict(lambda: defaultdict(list))
@@ -59,7 +56,7 @@ class ComputeMetrics():
         mrrs = np.zeros(shape=(batch_size, max_match_point))
 
         tasks = [
-            self.executor.submit(self._compute_metrics, I, iid, hits_matrix, ndcgs, mrrs, per) \
+            self.executor.submit(self._compute_metrics, I, iid, hits_matrix, ndcgs, mrrs, per)
             for per in range(batch_size)
         ]
         for task in tasks:
@@ -82,6 +79,7 @@ class ComputeMetrics():
                 aggregated_metrics[per_metric][math_point] = \
                     np.mean(np.concatenate(per_metric_value, axis=0))
         print('\n' + '#' * 132)
+        self.out.write('#' * 132 + '\n')
         for per_metric, per_aggregated_metric_values in aggregated_metrics.items():
             header = '=' * 52 + f'    {per_metric}    ' + '=' * 52
             print(header)
@@ -97,5 +95,7 @@ class ComputeMetrics():
             if per_metric_str:
                 print(per_metric_str)
                 self.out.write(per_metric_str + '\n')
+        print('#' * 132)
+        self.out.write('#' * 132 + '\n')
         self.out.flush()
         self.reset()

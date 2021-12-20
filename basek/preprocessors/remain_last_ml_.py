@@ -265,7 +265,7 @@ def read_reviews(
     dataset_df['cid_freq'] = cid_freq
     dataset_df['bid'] = processed_raw_dataset_df['behavior'].map(behavior_to_bid)
     bid_freq = dataset_df['bid'].map(dataset_df.groupby('bid')['bid'].count() / len(dataset_df))
-    dataset_df['iid_freq'] = bid_freq
+    dataset_df['bid_freq'] = bid_freq
     dataset_df['timestamp'] = processed_raw_dataset_df['timestamp']
     # iid_freq.to_pickle()
     # cid_freq.to_pickle()

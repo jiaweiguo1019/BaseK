@@ -5,20 +5,20 @@ import os
 
 parser = argparse.ArgumentParser(description='parser')
 
-parser.add_argument('--review_path', type=str, default='./datasets/Taobao/UserBehavior.csv')
-parser.add_argument('--seq_len', type=int, default=100)
-parser.add_argument('--from_raw', type=bool, default=True)
-parser.add_argument('--drop_dups', type=bool, default=False)
-parser.add_argument('--only_click', type=bool, default=False)
-parser.add_argument('--k_core', type=int, default=5)
-parser.add_argument('--id_ordered_by_count', type=bool, default=True)
+# parser.add_argument('--review_path', type=str, default='./datasets/Taobao/UserBehavior.csv')
+# parser.add_argument('--seq_len', type=int, default=100)
+# parser.add_argument('--from_raw', type=bool, default=True)
+# parser.add_argument('--drop_dups', type=bool, default=False)
+# parser.add_argument('--only_click', type=bool, default=False)
+# parser.add_argument('--k_core', type=int, default=5)
+# parser.add_argument('--id_ordered_by_count', type=bool, default=True)
 
 
 args, _ = parser.parse_known_args()
 
 if __name__ == '__main__':
 
-    dirpath = '/Users/rjbzzz/Jiawei/datasets/ml-20m'
+    dirpath = '/home/rjbzzz/ml-25m'
 
     for drop_dups in (False, True):
         for pp in (10, 30):

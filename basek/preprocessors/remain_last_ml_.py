@@ -381,20 +381,20 @@ def records_writer(
         feature = {
             'uid': tf.train.Feature(int64_list=tf.train.Int64List(value=[uid])),
             'iid': tf.train.Feature(int64_list=tf.train.Int64List(value=[iid])),
-            'iid_freq': tf.train.Feature(int64_list=tf.train.FloatList(value=[iid_freq])),
+            'iid_freq': tf.train.Feature(float_list=tf.train.FloatList(value=[iid_freq])),
             'neg_iid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_iid_list)),
             'cid': tf.train.Feature(int64_list=tf.train.Int64List(value=[cid])),
-            'cid_freq': tf.train.Feature(int64_list=tf.train.FloatList(value=[cid_freq])),
+            'cid_freq': tf.train.Feature(float_list=tf.train.FloatList(value=[cid_freq])),
             'neg_cid_list': tf.train.Feature(int64_list=tf.train.Int64List(value=neg_cid_list)),
             'bid': tf.train.Feature(int64_list=tf.train.Int64List(value=[bid])),
-            'bid_freq': tf.train.Feature(int64_list=tf.train.FloatList(value=[bid_freq])),
+            'bid_freq': tf.train.Feature(float_list=tf.train.FloatList(value=[bid_freq])),
             'timestamp': tf.train.Feature(int64_list=tf.train.Int64List(value=[timestamp])),
             'hist_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_iid_seq)),
-            'hist_iid_freq_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_iid_freq_seq)),
+            'hist_iid_freq_seq': tf.train.Feature(float_list=tf.train.FloatList(value=hist_iid_freq_seq)),
             'hist_cid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_cid_seq)),
-            'hist_cid_freq_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_cid_freq_seq)),
+            'hist_cid_freq_seq': tf.train.Feature(float_list=tf.train.FloatList(value=hist_cid_freq_seq)),
             'hist_bid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_bid_seq)),
-            'hist_bid_freq_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_bid_freq_seq)),
+            'hist_bid_freq_seq': tf.train.Feature(float_list=tf.train.FloatList(value=hist_bid_freq_seq)),
             'hist_ts_diff_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=hist_ts_diff_seq)),
             'hist_seq_len': tf.train.Feature(int64_list=tf.train.Int64List(value=[hist_seq_len])),
             'sample_iid_seq': tf.train.Feature(int64_list=tf.train.Int64List(value=sample_iid_seq)),
@@ -421,7 +421,7 @@ def records_writer(
         uid_curr_hist_seq_len = defaultdict(int)
         with tf.io.TFRecordWriter(tfrecords_path) as writer:
             for idx, row in tqdm(enumerate(dataset_df.itertuples())):
-                _, uid, iid, iid_freq, cid, cid_freq, bid, bid_freq, timestamp, iid_ = row
+                _, uid, iid, iid_freq, cid, cid_freq, bid, bid_freq, timestamp = row
                 curr_hist_seq_len = uid_curr_hist_seq_len[uid]
                 if mode == 'test':
                     if curr_hist_seq_len != uid_hist_seq_len[uid] - 1:

@@ -12,9 +12,9 @@ from basek.utils.imports import numpy as np
 from basek.utils.imports import random
 
 
-from basek.preprocessors.split_time_taobao_copy import read_reviews
+# from basek.preprocessors.split_time_taobao_copy import read_reviews
 from basek.utils.tf_compat import tf, keras
-import tensorflow_addons as tfa
+# import tensorflow_addons as tfa
 
 from basek.layers.base import (
     BiasAdd, BatchNormalization, Concatenate, Dense, Dropout, Embedding, Flatten, Index, Lambda, LayerNormalization
@@ -40,15 +40,20 @@ def parser(serialized_example):
         serialized_example,
         features={
             'uid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
+            'timestamp': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
+
             'iid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
             'iid_freq': tf.io.FixedLenFeature(shape=(1,), dtype=tf.float32),
-            'neg_iid_list': tf.io.FixedLenFeature(shape=(NEG_SAMPLES,), dtype=tf.int64),
             'cid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
             'cid_freq': tf.io.FixedLenFeature(shape=(1,), dtype=tf.float32),
-            'neg_cid_list': tf.io.FixedLenFeature(shape=(NEG_SAMPLES,), dtype=tf.int64),
             'bid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
             'bid_freq': tf.io.FixedLenFeature(shape=(1,), dtype=tf.float32),
-            'timestamp': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
+
+            'neg_iid_list': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'neg_iid_freq_list': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
+            'neg_cid_list': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'neg_cid_freq_list': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
+
             'hist_iid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
             'hist_iid_freq_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
             'hist_cid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
@@ -57,9 +62,13 @@ def parser(serialized_example):
             'hist_bid_freq_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
             'hist_ts_diff_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
             'hist_seq_len': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
+
             'sample_iid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'sample_iid_freq_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
             'sample_cid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'sample_cid_freq_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
             'sample_bid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
+            'sample_bid_freq_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
             'sample_ts_diff_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
             'sample_len': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64)
         }
@@ -78,22 +87,22 @@ if __name__ == '__main__':
 
     sparse_features = ['uid', 'iid', 'cid']
 
-    dirpath = '/data/project/datasets/Taobao/pp_30-k_core_10-id_ordered_by_count'
+    dirpath = '/home/zhaoweiqi03/.jupyter/datasets/movieLen25M/pp_10-k_core_10'
     sparse_features_max_idx_path = os.path.join(dirpath, 'sparse_features_max_idx.pkl')
-    all_indices_path = os.path.join(dirpath, 'all_indices.pkl')
-    train_file = os.path.join(dirpath, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-train.tfrecords')
-    test_file = os.path.join(dirpath, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-test.tfrecords')
+    all_indices_path = os.path.join(dirpath, 'id_ordered_by_count-all_indices.pkl')
+    train_file = os.path.join(dirpath, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-id_ordered_by_count-train.tfrecords')
+    test_file = os.path.join(dirpath, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-id_ordered_by_count-test.tfrecords')
 
     train_dataset = tf.data.TFRecordDataset(train_file)
     train_dataset = train_dataset.map(parser, num_parallel_calls=-1)
     train_dataset = train_dataset.shuffle(100 * BATCH_SIZE, seed=args.seed, reshuffle_each_iteration=True)
-    train_dataset = train_dataset.padded_batch(BATCH_SIZE).prefetch(10)
+    train_dataset = train_dataset.padded_batch(BATCH_SIZE).prefetch(-1)
     train_iterator = tf.data.make_initializable_iterator(train_dataset)
     train_batch = train_iterator.get_next()
 
     test_dataset = tf.data.TFRecordDataset(test_file)
     test_dataset = test_dataset.map(parser, num_parallel_calls=-1)
-    test_dataset = test_dataset.padded_batch(BATCH_SIZE).prefetch(10)
+    test_dataset = test_dataset.padded_batch(BATCH_SIZE).prefetch(-1)
     test_iterator = tf.data.make_initializable_iterator(test_dataset)
     test_batch = test_iterator.get_next()
 
@@ -303,11 +312,11 @@ if __name__ == '__main__':
                                 user_out, iid = sess.run([test_user_out, test_iid])
                                 # faiss.normalize_L2(val_user_out)
                                 _, I = index.search(np.ascontiguousarray(user_out), MAX_MATCH_POINT)
-                                metrics_q.put((I, iid, False))
+                                metrics_q.put((I, iid, False, False))
                                 print('\r' + '-' * 32 + f'   test batch {test_batch} finished   ' + '-' * 32, end='')
                                 test_batch += 1
                             except tf.errors.OutOfRangeError:
-                                metrics_q.put((None, None, True))
+                                metrics_q.put((None, None, True, False))
                                 curr_time = time()
                                 time_elapsed = curr_time - prev_time
                                 prev_time = curr_time
@@ -327,6 +336,7 @@ if __name__ == '__main__':
                     )
                     test_num += 1
                     print('=' * 40 + f'test times: {test_num:6d}' + '=' * 40)
+                    sess.run(train_iterator.initializer)
                     sess.run(test_iterator.initializer)
                     all_item_out = sess.run(all_item_embs)
                     index.reset()
@@ -338,15 +348,17 @@ if __name__ == '__main__':
                             user_out, iid = sess.run([test_user_out, test_iid])
                             # faiss.normalize_L2(val_user_out)
                             _, I = index.search(np.ascontiguousarray(user_out), MAX_MATCH_POINT)
-                            metrics_q.put((I, iid, False))
+                            metrics_q.put((I, iid, False, False))
                             print('\r' + '-' * 32 + f'   test batch {test_batch} finished   ' + '-' * 32, end='')
                             test_batch += 1
                         except tf.errors.OutOfRangeError:
-                            metrics_q.put((None, None, True))
+                            sess.run(train_iterator.initializer)
+                            sess.run(test_iterator.initializer)
+                            metrics_q.put((None, None, True, False))
                             curr_time = time()
                             time_elapsed = curr_time - prev_time
                             prev_time = curr_time
                             print('-' * 72 + f'    time elapsed: {time_elapsed:.2f}s' + '\n' + '#' * 132)
                             break
-                    saver.save(ckpt_path, epoch)
+                    # saver.save(ckpt_path, epoch)
                     break

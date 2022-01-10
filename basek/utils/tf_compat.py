@@ -25,7 +25,6 @@ def import_tf_compact():
 
 def import_keras():
     if 'keras' not in sys.modules:
-        # if 3 > int(tf.__version__.split('.')[0]) > 1:
         try:
             import keras
             if keras.__version__ < '2.3.0':

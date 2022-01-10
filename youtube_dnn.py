@@ -111,7 +111,6 @@ if __name__ == '__main__':
     with open(all_indices_path, 'rb') as f:
         all_indices = pkl.load(f)
 
-
     user_size = sparse_features_max_idx['uid']
     item_size = sparse_features_max_idx['iid']
     cate_size = sparse_features_max_idx['cid']

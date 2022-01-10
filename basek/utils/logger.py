@@ -16,7 +16,7 @@ class Logger(object):
             stats, ep, vars_flag, alg_vars = self.status_q.get()
             if vars_flag:
                 for i, alg_var in enumerate(alg_vars):
-                    self.writer.add_histogram('alg_vars/var_{}'.format(i + 1), alg_var, ep)
+                    self.writer.add_histogram(f'alg_vars/var_{i + 1}', alg_var, ep)
             for tag, val in stats.items():
                 if tag == 'is_ratio':
                     self.writer.add_histogram('is_ratio', val, ep)

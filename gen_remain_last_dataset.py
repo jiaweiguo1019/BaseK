@@ -25,7 +25,7 @@ if __name__ == '__main__':
     dirpath = args.dirpath
 
     for drop_dups in (False,):
-        for pp in (2,):
+        for pp in (50, None):
             write_ps = []
             for id_ordered_by_count in (True,):
                 read_ps = []
@@ -62,8 +62,8 @@ if __name__ == '__main__':
                     read_p.join()
 
                 for k_core in (10,):
-                    for max_seq_len in (50,):
-                        for neg_samples in (2,):
+                    for max_seq_len in (50, 100):
+                        for neg_samples in (10,):
                             subdir = ''
                             if pp:
                                 subdir = f'{subdir}-pp_{pp}'

@@ -46,46 +46,33 @@ def reduce_to_k_core(dataset, dataset_df, savepath, k_core):
         print(f'reduce_to_{k_core}_core finished!')
         return reduced_dataset_df
 
-    if dataset in ('amazon_books','amazon_electronics', 'yelp'):
-        sep = '$^$'
-        user_list = dataset_df['user'].tolist()
-        user_list = list(map(lambda x: 'user' + sep + x, user_list))
-        item_list = dataset_df['item'].tolist()
-        item_list = list(map(lambda x: 'item' + sep + x, item_list))
-        edges = list(zip(user_list, item_list))
-
-        g = nx.Graph()
+    g = nx.Graph()
+    user_list = dataset_df['user'].tolist()
+    item_list = dataset_df['item'].tolist()
+    if dataset in ('amazon_books', 'amazon_electronics', 'yelp'):
+        sep = '#$%^%$#'
+        edges = zip(map(lambda x: f'user{sep}{x}', user_list), map(lambda x: f'item{sep}{x}', item_list))
         g.add_edges_from(edges)
-        user_and_item = list(nx.k_core(g, k_core).edges)
-        if not user_and_item:
+        reduced_edges = list(nx.k_core(g, k_core).edges)
+        if not reduced_edges:
             raise ValueError(f'k_core numbser: {k_core} is too much, no more interactons left')
-        reduced_user_list, reduced_item_list = list(zip(*user_and_item))
+        reduced_user_list, reduced_item_list = zip(*reduced_edges)
         reduced_user_list = list(map(lambda x: x.split(sep)[-1], reduced_user_list))
         reduced_item_list = list(map(lambda x: x.split(sep)[-1], reduced_item_list))
-        reduced_user_set = set(reduced_user_list)
-        reduced_item_set = set(reduced_item_list)
-
-        reduced_dataset_df = dataset_df[
-            dataset_df['user'].isin(reduced_user_set) & dataset_df['item'].isin(reduced_item_set)
-        ]
     elif dataset in ('kwai', 'movielens', 'taobao', 'kwai'):
-        user_list = dataset_df['user'].tolist()
-        item_list = dataset_df['item'].tolist()
         user_offset = np.max(user_list) + 1
         item_offset = np.max(item_list) + 1
-        edges = list(zip(np.array(user_list) - user_offset, np.array(item_list) + item_offset))
-
-        g = nx.Graph()
+        edges = zip(np.array(user_list) - user_offset, np.array(item_list) + item_offset)
         g.add_edges_from(edges)
-        user_and_item = list(nx.k_core(g, k_core).nodes)
-        if not user_and_item:
+        reduced_edges = list(nx.k_core(g, k_core).edges)
+        if not reduced_edges:
             raise ValueError(f'k_core numbser: {k_core} is too much, no more interactons left')
-
-        reduced_user_list = np.array(list(filter(lambda x: x < 0, user_and_item))) + user_offset
-        reduced_item_list = np.array(list(filter(lambda x: x > 0, user_and_item))) - item_offset
-        reduced_dataset_df = dataset_df[
-            dataset_df['user'].isin(set(reduced_user_list)) & dataset_df['item'].isin(set(reduced_item_list))
-        ]
+        reduced_user_list, reduced_item_list = zip(*reduced_edges)
+        reduced_user_list = np.array(reduced_user_list) + user_offset
+        reduced_item_list = np.array(reduced_item_list) - item_offset
+    reduced_dataset_df = dataset_df[
+        dataset_df['user'].isin(set(reduced_user_list)) & dataset_df['item'].isin(set(reduced_item_list))
+    ]
 
     reduced_dataset_df = reduced_dataset_df.copy()
     reduced_dataset_df.to_pickle(reduced_dataset_path)

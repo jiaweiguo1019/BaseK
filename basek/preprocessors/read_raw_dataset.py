@@ -8,27 +8,26 @@ from basek.utils.imports import numpy as np
 
 
 def read_raw_dataset(dataset, dirpath, savepath, pp=None):
-
     item_to_cate_path = os.path.join(savepath, 'item_to_cate.pkl')
     raw_dataset_path = os.path.join(savepath, 'raw_dataset.pkl')
     if os.path.exists(item_to_cate_path) and os.path.exists(raw_dataset_path):
         item_to_cate = pd.read_pickle(item_to_cate_path)
         raw_dataset_df = pd.read_pickle(raw_dataset_path)
-        print('read_review finished!')
-        return item_to_cate, raw_dataset_df
-
-    if dataset == 'movielens':
-        return read_raw_dataset_movielens(dirpath, savepath, pp)
-    elif dataset in ('amazon_electronics', 'amazon_books'):
-        return read_raw_dataset_amazon(dataset, dirpath, savepath, pp)
-    elif dataset == 'taobao':
-        return read_raw_dataset_taobao(dirpath, savepath, pp)
-    elif dataset == 'yelp':
-        return read_raw_dataset_yelp(dirpath, savepath, pp)
-    elif dataset == 'kwai':
-        return read_raw_dataset_kwai(dirpath, savepath, pp)
     else:
-        raise ValueError(f'dataset: {dataset} not supported')
+        if dataset == 'movielens':
+            item_to_cate, raw_dataset_df = read_raw_dataset_movielens(dirpath, savepath, pp)
+        elif dataset in ('amazon_electronics', 'amazon_books'):
+            item_to_cate, raw_dataset_df =  read_raw_dataset_amazon(dataset, dirpath, savepath, pp)
+        elif dataset == 'taobao':
+            item_to_cate, raw_dataset_df = read_raw_dataset_taobao(dirpath, savepath, pp)
+        elif dataset == 'yelp':
+            item_to_cate, raw_dataset_df = read_raw_dataset_yelp(dirpath, savepath, pp)
+        elif dataset == 'kwai':
+            item_to_cate, raw_dataset_df = read_raw_dataset_kwai(dirpath, savepath, pp)
+        else:
+            raise ValueError(f'dataset: {dataset} not supported')
+    print('read_review finished!')
+    return item_to_cate, raw_dataset_df
 
 
 def read_raw_dataset_taobao(dirpath, savepath, pp):
@@ -54,16 +53,15 @@ def read_raw_dataset_taobao(dirpath, savepath, pp):
     raw_dataset_df.drop_duplicates(['user', 'item', 'behavior', 'timestamp'], inplace=True)
     raw_dataset_df.sort_values('timestamp', inplace=True)
     raw_dataset_df.reset_index(drop=True, inplace=True)
-
     item_to_cate = dict(zip(raw_dataset_df['item'], raw_dataset_df['cate']))
-    item_to_cate.update({'null': 'null', 'default': 'default'})
-    item_to_cate = pd.Series(item_to_cate)
 
+    item_to_cate = pd.Series(item_to_cate)
+    item_to_cate['null'] = 'null'
+    item_to_cate['default'] = 'default'
+    # raw_dataset_df['cate'] = item_to_cate[raw_dataset_df['item']].values
     raw_dataset_df['cate'] = raw_dataset_df['item'].map(item_to_cate)
     item_to_cate.to_pickle(item_to_cate_path)
     raw_dataset_df.to_pickle(raw_dataset_path)
-
-    print('read_review finished !')
     return item_to_cate, raw_dataset_df
 
 
@@ -90,16 +88,14 @@ def read_raw_dataset_kwai(dirpath, savepath, pp):
     raw_dataset_df.drop_duplicates(['user', 'item', 'behavior', 'timestamp'], inplace=True)
     raw_dataset_df.sort_values('timestamp', inplace=True)
     raw_dataset_df.reset_index(drop=True, inplace=True)
-
     item_to_cate = dict(zip(raw_dataset_df['item'], raw_dataset_df['cate']))
-    item_to_cate.update({'null': 'null', 'default': 'default'})
-    item_to_cate = pd.Series(item_to_cate)
 
+    item_to_cate = pd.Series(item_to_cate)
+    item_to_cate['null'] = 'null'
+    item_to_cate['default'] = 'default'
     raw_dataset_df['cate'] = raw_dataset_df['item'].map(item_to_cate)
     item_to_cate.to_pickle(item_to_cate_path)
     raw_dataset_df.to_pickle(raw_dataset_path)
-
-    print('read_review finished !')
     return item_to_cate, raw_dataset_df
 
 
@@ -116,10 +112,6 @@ def read_raw_dataset_yelp(dirpath, savepath, pp=None):
             item, cate = line['business_id'], line['categories']
             cate = 'default' if cate is None else cate.split(',')[-1].strip()
             item_to_cate[item] = cate
-    item_to_cate = pd.Series(item_to_cate)
-    item_to_cate['null'] = 'null'
-    item_to_cate['default'] = 'default'
-    item_to_cate.to_pickle(item_to_cate_path)
 
     raw_dataset = {}
     with open(review_path, 'r') as f:
@@ -142,10 +134,13 @@ def read_raw_dataset_yelp(dirpath, savepath, pp=None):
     raw_dataset_df.drop_duplicates(['user', 'item', 'behavior', 'timestamp'], inplace=True)
     raw_dataset_df.sort_values('timestamp', inplace=True)
     raw_dataset_df.reset_index(drop=True, inplace=True)
-    raw_dataset_df['cate'] = item_to_cate[raw_dataset_df['item']].values
-    raw_dataset_df.to_pickle(raw_dataset_path)
 
-    print('read_review finished !')
+    item_to_cate = pd.Series(item_to_cate)
+    item_to_cate['null'] = 'null'
+    item_to_cate['default'] = 'default'
+    raw_dataset_df['cate'] = raw_dataset_df['item'].map(item_to_cate)
+    item_to_cate.to_pickle(item_to_cate_path)
+    raw_dataset_df.to_pickle(raw_dataset_path)
     return item_to_cate, raw_dataset_df
 
 
@@ -179,16 +174,14 @@ def read_raw_dataset_movielens(dirpath, savepath, pp):
     raw_dataset_df.drop_duplicates(['user', 'item', 'behavior', 'timestamp'], inplace=True)
     raw_dataset_df.sort_values('timestamp', inplace=True)
     raw_dataset_df.reset_index(drop=True, inplace=True)
-
     item_to_cate = dict(zip(raw_dataset_df['item'], raw_dataset_df['cate']))
-    item_to_cate.update({'null': 'null', 'default': 'default'})
-    item_to_cate = pd.Series(item_to_cate)
 
+    item_to_cate = pd.Series(item_to_cate)
+    item_to_cate['null'] = 'null'
+    item_to_cate['default'] = 'default'
     raw_dataset_df['cate'] = raw_dataset_df['item'].map(item_to_cate)
     item_to_cate.to_pickle(item_to_cate_path)
     raw_dataset_df.to_pickle(raw_dataset_path)
-
-    print('read_review finished !')
     return item_to_cate, raw_dataset_df
 
 
@@ -210,11 +203,6 @@ def read_raw_dataset_amazon(dataset, dirpath, savepath, pp=None):
             item, cate = line['asin'], line['categories'][-1][-1]
             item_to_cate[item] = cate
 
-    item_to_cate = pd.Series(item_to_cate)
-    item_to_cate['null'] = 'null'
-    item_to_cate['default'] = 'default'
-    item_to_cate.to_pickle(item_to_cate_path)
-
     raw_dataset = {}
     with open(review_path, 'r') as f:
         for i, line in tqdm(enumerate(f)):
@@ -235,8 +223,11 @@ def read_raw_dataset_amazon(dataset, dirpath, savepath, pp=None):
     raw_dataset_df.drop_duplicates(['user', 'item', 'behavior', 'timestamp'], inplace=True)
     raw_dataset_df.sort_values('timestamp', inplace=True)
     raw_dataset_df.reset_index(drop=True, inplace=True)
-    raw_dataset_df['cate'] = item_to_cate[raw_dataset_df['item']].values
-    raw_dataset_df.to_pickle(raw_dataset_path)
 
-    print('read_review finished !')
+    item_to_cate = pd.Series(item_to_cate)
+    item_to_cate['null'] = 'null'
+    item_to_cate['default'] = 'default'
+    raw_dataset_df['cate'] = raw_dataset_df['item'].map(item_to_cate)
+    item_to_cate.to_pickle(item_to_cate_path)
+    raw_dataset_df.to_pickle(raw_dataset_path)
     return item_to_cate, raw_dataset_df

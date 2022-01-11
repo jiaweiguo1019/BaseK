@@ -11,8 +11,6 @@ import faiss
 from basek.utils.imports import numpy as np
 from basek.utils.imports import random
 
-
-# from basek.preprocessors.split_time_taobao_copy import read_reviews
 from basek.utils.tf_compat import tf, keras
 # import tensorflow_addons as tfa
 

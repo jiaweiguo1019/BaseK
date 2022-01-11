@@ -13,7 +13,6 @@ def read_reviews(
     id_ordered_by_count=True
 ):
     os.makedirs(savepath, exist_ok=True)
-
     item_to_cate, raw_dataset_df = \
         read_raw_dataset(dataset, dirpath, savepath, pp)
     processed_raw_dataset_df, user_count, item_count, cate_count, behavior_count = process_raw_dataset(

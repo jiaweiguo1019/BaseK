@@ -1,3 +1,5 @@
+import os
+
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -6,13 +8,15 @@ from basek.utils.imports import numpy as np
 
 class ComputeMetrics():
 
-    def __init__(self, q, match_points, outfile='./metrics'):
+    def __init__(self, q, match_points, name='default', outfile='./metrics'):
         self.q = q
         self.match_points = sorted(list(set(match_points)))
         self.max_match_point = self.match_points[-1]
         self.executor = ThreadPoolExecutor(max_workers=16)
         self.count = 0
-        self.out = open(outfile, 'a')
+        if not os.path.exists(outfile):
+            os.makedirs(outfile)
+        self.out = open(os.path.join(outfile, name), 'a')
         self.metrics = defaultdict(lambda: defaultdict(list))
 
     def compute_metrics(self):

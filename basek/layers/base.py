@@ -22,7 +22,7 @@ class BiasAdd(Layer):
     def build(self, input_shape):
         dim = input_shape[-1]
         self.bias = self.add_weight(
-            shape=[dim], initializer=keras.initializers.Zeros(), name="bias"
+            shape=[dim], initializer=keras.initializers.Zeros(), name='bias'
         )
         super().build(input_shape)
 

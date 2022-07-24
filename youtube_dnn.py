@@ -23,6 +23,7 @@ from basek.utils.metrics__ import ComputeMetrics
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus
 
 
+DIR_PATH = '/home/rjbzzz/BaseK/datasets/movielens-1m/k_core_10'
 SEQ_LEN = 50
 NEG_SAMPLES = 10
 USER_EMB_DIM = 64
@@ -31,6 +32,8 @@ CATE_EMB_DIM = 16
 EPOCHS = args.epochs
 BATCH_SIZE = 1024
 MATCH_POINTS = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200, 250, 300, 350, 400]
+
+
 
 
 def parser(serialized_example):
@@ -47,10 +50,10 @@ def parser(serialized_example):
             'bid': tf.io.FixedLenFeature(shape=(1,), dtype=tf.int64),
             'bid_freq': tf.io.FixedLenFeature(shape=(1,), dtype=tf.float32),
 
-            'neg_iid_list': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
-            'neg_iid_freq_list': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
-            'neg_cid_list': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
-            'neg_cid_freq_list': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
+            'neg_iid_list': tf.io.FixedLenFeature(shape=(NEG_SAMPLES,), dtype=tf.int64),
+            'neg_iid_freq_list': tf.io.FixedLenFeature(shape=(NEG_SAMPLES,), dtype=tf.float32),
+            'neg_cid_list': tf.io.FixedLenFeature(shape=(NEG_SAMPLES,), dtype=tf.int64),
+            'neg_cid_freq_list': tf.io.FixedLenFeature(shape=(NEG_SAMPLES,), dtype=tf.float32),
 
             'hist_iid_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.int64),
             'hist_iid_freq_seq': tf.io.FixedLenFeature(shape=(SEQ_LEN,), dtype=tf.float32),
@@ -85,11 +88,19 @@ if __name__ == '__main__':
 
     sparse_features = ['uid', 'iid', 'cid']
 
-    dirpath = '/home/zhaoweiqi03/.jupyter/datasets/movieLen25M/pp_10-k_core_10'
-    sparse_features_max_idx_path = os.path.join(dirpath, 'sparse_features_max_idx.pkl')
-    all_indices_path = os.path.join(dirpath, 'id_ordered_by_count-all_indices.pkl')
-    train_file = os.path.join(dirpath, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-id_ordered_by_count-train.tfrecords')
-    test_file = os.path.join(dirpath, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-id_ordered_by_count-test.tfrecords')
+    
+    sparse_features_max_idx_path = os.path.join(DIR_PATH, 'sparse_features_max_idx.pkl')
+    all_indices_path = os.path.join(DIR_PATH, 'id_ordered_by_count-all_indices.pkl')
+    train_file = os.path.join(DIR_PATH, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-id_ordered_by_count-train.tfrecords')
+    test_file = os.path.join(DIR_PATH, f'max_seq_len_{SEQ_LEN}-neg_samples_{NEG_SAMPLES}-id_ordered_by_count-test.tfrecords')
+
+    if not (
+        os.path.exists(sparse_features_max_idx_path)
+        and os.path.exists(all_indices_path)
+        and os.path.exists(train_file)
+        and os.path.exists(test_file)
+    ):
+        raise ValueError(f'no data in {DIR_PATH}')
 
     train_dataset = tf.data.TFRecordDataset(train_file)
     train_dataset = train_dataset.map(parser, num_parallel_calls=-1)
@@ -118,7 +129,7 @@ if __name__ == '__main__':
         + f'cate_size: {cate_size}    ' + '-' * 16 + '\n' + '#' * 132
     )
 
-    timestamp = strftime("%Y%m%d_%H%M%S", localtime())
+    timestamp = strftime('%Y%m%d_%H%M%S', localtime())
     ckpt_path = './ckpts/' + timestamp
     log_path = './logs/' + timestamp
     os.makedirs(ckpt_path)
@@ -236,14 +247,16 @@ if __name__ == '__main__':
     all_cid_index = Index(all_cid_index, name='all_cid_index')()
     all_item_embs = _item_all_embs(all_iid_index, all_cid_index, training=False)
 
-    res = faiss.StandardGpuResources()
-    flat_config = faiss.GpuIndexFlatConfig()
-    flat_config.device = 0
-    index = faiss.GpuIndexFlatL2(res, ITEM_EMB_DIM + CATE_EMB_DIM, flat_config)
-    # index = faiss.IndexFlatIP(ITEM_EMB_DIM + CATE_EMB_DIM)
+    try:
+        res = faiss.StandardGpuResources()
+        flat_config = faiss.GpuIndexFlatConfig()
+        flat_config.device = 0
+        index = faiss.GpuIndexFlatL2(res, ITEM_EMB_DIM + CATE_EMB_DIM, flat_config)
+    except:
+       index = faiss.IndexFlatIP(ITEM_EMB_DIM + CATE_EMB_DIM)
 
     metrics_q = Queue()
-    metrics_computer = ComputeMetrics(metrics_q, MATCH_POINTS, './youtube_taobao')
+    metrics_computer = ComputeMetrics(metrics_q, MATCH_POINTS, 'youtubeDNN')
     metrics_computer_p = Process(target=metrics_computer.compute_metrics)
     metrics_computer_p.daemon = True
     metrics_computer_p.start()

@@ -59,7 +59,7 @@ def reduce_to_k_core(dataset, dataset_df, savepath, k_core):
         reduced_user_list, reduced_item_list = zip(*reduced_edges)
         reduced_user_list = list(map(lambda x: x.split(sep)[-1], reduced_user_list))
         reduced_item_list = list(map(lambda x: x.split(sep)[-1], reduced_item_list))
-    elif dataset in ('kwai', 'movielens', 'taobao', 'kwai'):
+    elif dataset in ('kwai', 'movielens-1m', 'movielens-25m', 'taobao'):
         user_offset = np.max(user_list) + 1
         item_offset = np.max(item_list) + 1
         edges = zip(np.array(user_list) - user_offset, np.array(item_list) + item_offset)

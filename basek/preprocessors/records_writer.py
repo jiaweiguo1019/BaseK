@@ -30,7 +30,11 @@ def records_writer(
         freq_path_prefix = os.path.join(savepath, 'no_id_ordered_by_count-freq_path')
     bid_to_sample_tempature_path = os.path.join(savepath, 'bid_to_sample_tempature.pkl')
 
-    dataset_df = pd.read_pickle(dataset_df_path)
+    try:
+        dataset_df = pd.read_pickle(dataset_df_path)
+    except:
+        raise ValueError(f'no data in {savepath}')
+
     with open(sparse_features_max_idx_path, 'rb') as f:
         sparse_features_max = pkl.load(f)
     iid_size = sparse_features_max['iid']
@@ -86,7 +90,7 @@ def records_writer(
         uid_neg_iid_list, uid_neg_iid_freq_list, uid_neg_cid_list, uid_neg_cid_freq_list = \
             defaultdict(list), defaultdict(list), defaultdict(list), defaultdict(list)
 
-    all_sample_list = np.array(list(range(1, iid_size)))
+    all_sample_set = set(range(1, iid_size))
     for uid, uid_hist in tqdm(dataset_df.groupby('uid')):
         hist_iid_seq = np.array(uid_hist['iid'].to_list())
         hist_iid_freq_seq = np.array(uid_hist['iid_freq'].to_list())
@@ -112,16 +116,19 @@ def records_writer(
 
         if not neg_sample_finished:
             hist_iid_set = set(hist_iid_seq)
-            neg_iid_set = set()
-            neg_iid_samples = 0
-            while True:
-                if neg_iid_samples == neg_samples * hist_seq_len:
-                    break
-                neg_iid = np.random.choice(all_sample_list)
-                if (neg_iid not in hist_iid_set) and (neg_iid not in neg_iid_set):
-                    neg_iid_set.add(neg_iid)
-                    neg_iid_samples += 1
-            neg_iid_list = np.array(list(neg_iid_set))
+            all_neg_list = list(all_sample_set - hist_iid_set)
+            all_neg_list = np.array(all_neg_list)
+            neg_iid_list = []
+            if neg_samples > len(all_neg_list):
+                raise ValueError('neg_samples is too large, please check')
+            if neg_samples < 0:
+                raise ValueError('neg_samples is less than 0, please check')
+            elif neg_samples == 0:
+                neg_iid_list = [0] * hist_seq_len
+            else:
+                for _ in range(hist_seq_len):
+                    neg_iid_list += list(np.random.choice(all_neg_list, neg_samples, replace=False))
+            neg_iid_list = np.array(list(neg_iid_list))
             neg_iid_freq_list = iid_freq[neg_iid_list]
             neg_cid_list = iid_to_cid[neg_iid_list]
             neg_cid_freq_list = cid_freq[neg_cid_list]
@@ -138,6 +145,7 @@ def records_writer(
             pkl.dump(uid_neg_cid_list, f)
         with open(uid_neg_cid_freq_list_path, 'wb') as f:
             pkl.dump(uid_neg_cid_freq_list, f)
+        neg_sample_finished = True
 
     def _writer(mode):
         tfrecords_path = os.path.join(savepath, f'{tfrecords_prefix}-{mode}.tfrecords')

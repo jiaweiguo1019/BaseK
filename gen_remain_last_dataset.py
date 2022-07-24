@@ -3,10 +3,10 @@ from multiprocessing import Process
 import argparse
 import os
 
-
+ABS_PATH = os.path.abspath('.')
 parser = argparse.ArgumentParser(description='parser')
-parser.add_argument('--dataset', type=str, default='movielens')
-parser.add_argument('--dirpath', type=str)
+parser.add_argument('--dataset', type=str, default='movielens-1m')
+parser.add_argument('--dirpath', type=str, default=os.path.join(ABS_PATH, 'datasets', 'movielens-1m'))
 
 # parser.add_argument('--dataset', type=str, default='movielens')
 # parser.add_argument('--review_path', type=str, default='./datasets/Taobao/UserBehavior.csv')
@@ -20,16 +20,22 @@ parser.add_argument('--dirpath', type=str)
 args, _ = parser.parse_known_args()
 
 
+all_pp = (None,)
+all_k_core = (10,)
+all_max_seq_len = (50, 100)
+all_neg_samples = (10,)
+
+
 if __name__ == '__main__':
     dataset = args.dataset
     dirpath = args.dirpath
 
     for drop_dups in (False,):
-        for pp in (50, None):
+        for pp in all_pp:
             write_ps = []
             for id_ordered_by_count in (True,):
                 read_ps = []
-                for k_core in (10,):
+                for k_core in all_k_core:
                     subdir = ''
                     if pp:
                         subdir = f'{subdir}-pp_{pp}'
@@ -61,9 +67,9 @@ if __name__ == '__main__':
                 for read_p in read_ps:
                     read_p.join()
 
-                for k_core in (10,):
-                    for max_seq_len in (50, 100):
-                        for neg_samples in (10,):
+                for k_core in all_k_core:
+                    for max_seq_len in all_max_seq_len:
+                        for neg_samples in all_neg_samples:
                             subdir = ''
                             if pp:
                                 subdir = f'{subdir}-pp_{pp}'

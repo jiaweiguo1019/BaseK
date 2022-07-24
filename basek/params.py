@@ -19,7 +19,7 @@ parser.add_argument('--first_lines', type=int, default=None, help='first_lines')
 # -- Training -- #
 # parser.add_argument('-f', '--config_file', required=True, help='config file')
 parser.add_argument('-t', '--task', type=str, default='train', help='train, test or eval')
-parser.add_argument('-e', '--epochs', type=int, default=8, help='num of epochs')
+parser.add_argument('-e', '--epochs', type=int, default=16, help='num of epochs')
 parser.add_argument('--gpus', type=str, default='0', help='gups')
 parser.add_argument('--filter', type=int, default=5, help='filter')
 parser.add_argument('--dirpath', type=str, default=None, help='dirpath')
